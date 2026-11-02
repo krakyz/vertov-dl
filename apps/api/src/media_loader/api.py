@@ -55,6 +55,7 @@ class Source(BaseModel):
 class Download(BaseModel):
     model_config = ConfigDict(extra="forbid")
     probe_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    replace_job_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     preset: Literal["360", "720", "1080", "best", "audio"] = "720"
     format_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,80}$")
 
@@ -294,7 +295,7 @@ def create_app(settings: Settings, *, run_manager=True):
 
     @app.post("/api/downloads", status_code=202, dependencies=auth)
     async def download(body: Download):
-        capacity()
+        capacity(body.replace_job_id)
         parent = get_job(body.probe_id)
         if parent["kind"] != "probe" or parent["state"] != "completed":
             raise HTTPException(409, "Сначала получите метаданные")
@@ -306,6 +307,28 @@ def create_app(settings: Settings, *, run_manager=True):
             if not any(item.get("id") == body.format_id for item in formats):
                 raise HTTPException(422, "Такого формата нет в ответе probe")
             preset = f"format:{body.format_id}"
+        if body.replace_job_id:
+            previous = get_job(body.replace_job_id)
+            if (
+                previous["kind"] != "download"
+                or previous["state"] != "cancelled"
+                or previous["source"] != parent["source"]
+                or (previous.get("details") or {}).get("_queue_hidden")
+            ):
+                raise HTTPException(409, "Повторный запуск этой задачи недоступен")
+            if manager and previous["id"] in manager.current_ids:
+                raise HTTPException(409, "Подождите завершения отмены")
+            store.update(
+                previous["id"],
+                preset=preset,
+                state="queued",
+                progress=None,
+                error_code=None,
+                artifact=None,
+                sha256=None,
+                message="В очереди",
+            )
+            return inherit_metadata(store.get(previous["id"]), parent)
         created = store.create("download", parent["source"], preset)
         result = inherit_metadata(created, parent)
         store.dismiss(parent["id"])
@@ -325,7 +348,7 @@ def create_app(settings: Settings, *, run_manager=True):
         job = get_job(job_id)
         if job["state"] not in {"failed", "cancelled", "expired"}:
             raise HTTPException(409, "Повтор недоступен")
-        if job["kind"] == "download" and job["state"] == "failed":
+        if job["kind"] == "download" and job["state"] in {"failed", "cancelled"}:
             if manager and job_id in manager.current_ids:
                 raise HTTPException(409, "Подождите завершения работы")
             if (job.get("details") or {}).get("_queue_hidden"):

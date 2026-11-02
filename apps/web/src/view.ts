@@ -1,5 +1,6 @@
 import { element, node, query } from './dom';
-import { active, bytes, duration, formatLabel, jobError, labels, quality } from './model';
+import { attachCardOutline } from './card-outline';
+import { active, bytes, duration, formatLabel, jobError, labels, downloadStatus, thumbnailBadge, mediaName } from './model';
 import type { Job, MediaEntry } from './model';
 import { CardProgress } from './card-progress';
 import { CancelButton } from './cancel-button';
@@ -21,9 +22,16 @@ export class MediaCard {
   private current?: Job;
   private progress = new CardProgress();
   private cancellation: CancelButton;
+  private audioCancellation: CancelButton;
+  private refreshBadge?: () => void;
+  private updateKey = '';
+  private disposeOutline: () => void;
+
+  dispose() { this.disposeOutline(); this.cancellation.update(undefined); this.audioCancellation.update(undefined); }
 
   constructor(private readonly actions: CardActions) {
     this.root = element<HTMLTemplateElement>('card-template').content.firstElementChild!.cloneNode(true) as HTMLElement;
+    this.disposeOutline = attachCardOutline(this.root);
     this.image = query<HTMLImageElement>(this.root, '.thumbnail-image');
     this.choice = query<HTMLSelectElement>(this.root, '.format-choice');
     this.image.addEventListener('load', () => {
@@ -39,15 +47,20 @@ export class MediaCard {
     const mainButton = query<HTMLButtonElement>(this.root, '.download-video');
     this.cancellation = new CancelButton(mainButton, actions.cancel);
     mainButton.addEventListener('click', () => { if (!this.current || !active(this.current)) { if(this.current?.kind==='download' && this.current.state==='failed') actions.retry(this.current.id);else actions.download('video', this.choice.value); } });
-    query(this.root, '.download-audio').addEventListener('click', () => {if(this.current?.kind==='download' && this.current.state==='failed') actions.retry(this.current.id);else actions.download('audio', '');});
+    this.audioCancellation = new CancelButton(query<HTMLButtonElement>(this.root, '.download-audio'), actions.cancel);
+    query(this.root, '.download-audio').addEventListener('click', () => {if(this.current?.kind==='download' && active(this.current)) return; if(this.current?.kind==='download' && this.current.state==='failed') actions.retry(this.current.id);else actions.download('audio', '');});
     query(this.root, '.refresh-data').addEventListener('click', actions.refresh);
     this.choice.addEventListener('change', () => {
+      this.refreshBadge?.();
       if (!this.current || !active(this.current)) query(this.root, '.download-video').textContent = this.exactEnabled && this.choice.value ? 'Скачать формат' : 'Скачать видео';
     });
   }
 
   update(entry: MediaEntry, probe: Job | undefined, download: Job | undefined,
-         options: { advanced: boolean; exact: boolean; authenticated: boolean; preferred: string; canDownload?: boolean }) {
+         options: { advanced: boolean; exact: boolean; authenticated: boolean; preferred: string; quality?: string; dispatched?: boolean; canDownload?: boolean }) {
+    const updateKey = JSON.stringify([entry, probe, download, options]);
+    if (updateKey === this.updateKey) return;
+    this.updateKey = updateKey;
     const ready = probe?.state === 'completed' && Array.isArray(probe.details?.formats);
     this.current = download || probe;
     const details = probe?.details || null;
@@ -55,11 +68,10 @@ export class MediaCard {
     this.root.setAttribute('aria-label', title);
     query(this.root, '.thumbnail').setAttribute('aria-label', `Открыть превью: ${title}`);
     query(this.root, '.media-name').textContent = title;
-    query(this.root, '.media-author').textContent = details?.uploader ? ` — ${details.uploader}` : '';
+    query(this.root, '.media-author').textContent = details?.uploader || '';
     const durationBadge = query<HTMLElement>(this.root, '.duration');
     durationBadge.textContent = details ? duration(details.duration) : '';
     durationBadge.hidden = details?.duration == null;
-    query(this.root, '.quality').textContent = quality(details);
     this.root.classList.toggle('pending', entry.pending || Boolean(probe && active(probe)));
     const thumbKey = details?.has_thumbnail && probe ? probe.id : '';
     if (thumbKey !== this.thumbnailKey) {
@@ -101,12 +113,26 @@ export class MediaCard {
       }
       if (formats.some(format => format.id === selected)) this.choice.value = selected;
     }
+    this.refreshBadge=()=>{
+      const badge=query<HTMLElement>(this.root,'.media-card-badges');
+      const value=thumbnailBadge(download,details,{kind:options.preferred,formatId:this.exactEnabled ? this.choice.value : undefined,quality:options.quality});
+      badge.hidden=!ready && !download;
+      query(badge,'.media-download-label').textContent=value.label;
+      const icon=query<HTMLImageElement>(badge,'.media-download-icon');
+      const path=`assets/media-type-${value.kind}.svg`;
+      if(icon.getAttribute('src')!==path) icon.src=path;
+    };
+    this.refreshBadge();
     query(this.root, '.download-video').textContent = this.exactEnabled && this.choice.value ? 'Скачать формат' : 'Скачать видео';
     const working = Boolean(this.current && active(this.current));
     this.root.classList.toggle('working', working);
-    this.cancellation.update(working ? this.current!.id : undefined, options.authenticated);
+    this.root.classList.toggle('metadata-pending', Boolean(!download && (entry.pending || (probe && active(probe)))));
+    const locked = Boolean(entry.sending || (download && (active(download) || download.state==='failed')));
+    const lockedKind = download ? (mediaName(download)==='Аудио' ? 'audio' : 'video') : entry.sendingKind;
+    this.root.dataset.singleAction = locked && lockedKind ? lockedKind : '';
+    this.cancellation.update(working && !(download && lockedKind==='audio') ? this.current!.id : undefined, options.authenticated);
     const resumable=download?.state==='failed';
-    query(this.root, '.download-audio').textContent=resumable && download.preset==='audio' ? 'Продолжить MP3' : 'Скачать MP3';
+    query(this.root, '.download-audio').textContent=resumable && download.preset==='audio' ? 'Продолжить MP3' : 'Скачать аудио';
     if(resumable) {
       const audio=download.preset==='audio';
       query<HTMLButtonElement>(this.root,'.download-audio').disabled=!audio || !options.authenticated || Boolean(entry.sending);
@@ -114,31 +140,45 @@ export class MediaCard {
       if(!audio) query(this.root,'.download-video').textContent='Продолжить скачивание видео';
       query<HTMLElement>(this.root,'.card-options').hidden=true;
     }
+    this.audioCancellation.update(download && active(download) && lockedKind==='audio' ? download.id : undefined, options.authenticated);
+    for (const kind of ['audio','video']) {
+      const button = query<HTMLButtonElement>(this.root, `.download-${kind}`);
+      button.inert = locked && Boolean(lockedKind) && kind!==lockedKind;
+    }
     const fill = this.progress.update(download || (probe?.state !== 'completed' ? probe : undefined), Boolean(entry.error));
     this.root.style.setProperty('--job-percent', `${fill.percent}%`);
     this.root.dataset.progressTone = fill.tone;
     const meter = query<HTMLElement>(this.root, '.card-progress');
-    meter.setAttribute('aria-valuenow', String(Math.round(fill.percent)));
-    meter.setAttribute('aria-valuetext', `${labels[this.current?.state || ''] || 'Нет загрузки'} · ${Math.round(fill.percent)}%`);
 
     const status = query<HTMLElement>(this.root, '.download-status');
-    status.classList.toggle('complete', !entry.error && !entry.sending && download?.state === 'completed');
+    const statusText = query<HTMLElement>(status, '.download-status-text');
+    const completed = !entry.error && !entry.sending && download?.state === 'completed';
+    status.classList.toggle('complete', completed);
+    query(status,'.status-progress').setAttribute('aria-hidden',String(completed));
     status.classList.toggle('queued', !entry.error && !entry.sending && (download || probe)?.state === 'queued');
     const statusJob = download || probe;
     const animating = !entry.error && (entry.sending || (statusJob ? ['probing', 'downloading', 'processing'].includes(statusJob.state) : entry.pending));
     status.classList.toggle('active-status', Boolean(animating));
+    const measured = Boolean(statusJob?.progress?.total) || statusJob?.state==='completed';
+    const indeterminate = Boolean(animating) && !measured;
+    meter.dataset.mode = indeterminate ? 'indeterminate' : 'determinate';
+    meter.classList.toggle('has-progress',fill.percent>0);
+    if(indeterminate) meter.removeAttribute('aria-valuenow');else meter.setAttribute('aria-valuenow',String(Math.round(fill.percent)));
+    meter.setAttribute('aria-valuetext',`${labels[statusJob?.state || ''] || 'Ожидание'} · ${indeterminate ? 'без определённого процента' : `${Math.round(fill.percent)}%`}`);
+    query(this.root,'.status-progress-value').textContent=indeterminate ? '—' : `${Math.round(fill.percent)}%`;
+
     status.hidden = false;
     status.classList.remove('failure');
-    if (entry.error) { status.textContent = entry.error; status.classList.add('failure'); }
-    else if (entry.sending) status.textContent = 'Постановка в очередь…';
+    if (entry.error) { statusText.textContent = entry.error; status.classList.add('failure'); }
+    else if (entry.sending) statusText.textContent = `Постановка ${entry.sendingKind==='audio' ? 'аудио' : 'видео'} в очередь`;
     else if (download) {
-      status.textContent = download.state === 'failed' ? jobError(download) : download.state === 'expired' ? download.message : labels[download.state] || download.state;
+      statusText.textContent = downloadStatus(download,options.dispatched);
       status.classList.toggle('failure', download.state === 'failed');
     } else if (probe && probe.state !== 'completed') {
-      status.textContent = probe.state === 'failed' ? jobError(probe) : probe.state === 'expired' ? probe.message : labels[probe.state] || probe.state;
+      statusText.textContent = probe.state === 'failed' ? jobError(probe) : probe.state === 'expired' ? probe.message : downloadStatus(probe);
       status.classList.toggle('failure', probe.state === 'failed');
-    } else if (entry.pending) status.textContent = 'Получение данных…';
-    else { status.hidden = true; status.textContent = ''; }
+    } else if (entry.pending) statusText.textContent = 'Получение метаданных';
+    else { status.hidden = true; statusText.textContent = ''; }
 
     const output = query<HTMLElement>(this.root, '.job-output');
     const outputKey = `${download?.id}:${download?.state}|${probe?.id}:${probe?.state}|${entry.error || ''}`;
@@ -146,7 +186,7 @@ export class MediaCard {
       this.outputKey = outputKey;
       output.replaceChildren();
       const current = download || probe;
-      if (current && ['failed', 'cancelled', 'expired'].includes(current.state) && !(current.kind==='download' && current.state==='failed')) {
+      if (current && ['failed', 'cancelled', 'expired'].includes(current.state) && !(current.kind==='download' && ['failed','cancelled'].includes(current.state))) {
         const retry = node('button', 'Повторить', 'inline-action'); retry.type = 'button';
         retry.addEventListener('click', () => this.actions.retry(current.id)); output.append(retry);
       } else if (entry.error && !entry.pending) {
@@ -157,11 +197,10 @@ export class MediaCard {
     }
     if (download && active(download) && download.progress) {
       const data = download.progress;
-      status.textContent += ` · ${bytes(data.downloaded)} / ${bytes(data.total)} · ${bytes(data.speed)}/с`;
+      statusText.textContent += ` · ${bytes(data.downloaded)} / ${bytes(data.total)} · ${bytes(data.speed)}/с`;
       meter.title = 'Прогресс текущего потока; видео и аудио могут загружаться отдельно.';
     }
-    // The animated suffix supplies punctuation without restarting on SSE updates.
-    status.textContent = status.textContent?.replace(/[.…]+$/u, '') || '';
+
   }
 }
 

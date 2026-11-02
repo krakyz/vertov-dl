@@ -18,16 +18,16 @@ test('unknown size retains measured progress without inventing a percentage', ()
   meter.update({id:'one',state:'downloading',progress:{downloaded:30,total:100}});
   assert.equal(meter.update({id:'one',state:'processing',progress:null}).percent,30);
 });
-class Button extends EventTarget { textContent='';disabled=false;dataset={};title=''; }
+class Button extends EventTarget { textContent='';disabled=false;dataset={};title='';classes=new Set();classList={toggle:(name,on)=>on?this.classes.add(name):this.classes.delete(name)}; }
 test('cancel needs two clicks, survives progress updates and submits only once', async () => {
   const button = new Button(); const calls=[]; let resolve;
   const control = new CancelButton(button, id => { calls.push(id);return new Promise(done => {resolve=done;}); });
-  control.update('one'); button.dispatchEvent(new Event('click'));
+  control.update('one'); assert.equal(button.classes.has('cancel-action'),true); button.dispatchEvent(new Event('click'));
   assert.equal(button.textContent,'Подтвердить отмену'); assert.deepEqual(calls,[]);
   control.update('one'); assert.equal(button.textContent,'Подтвердить отмену');
   button.dispatchEvent(new Event('click')); button.dispatchEvent(new Event('click'));
   await Promise.resolve(); assert.deepEqual(calls,['one']); assert.equal(button.disabled,true);
-  resolve(); await new Promise(setImmediate); control.update(undefined);
+  resolve(); await new Promise(setImmediate); control.update(undefined); assert.equal(button.classes.has('cancel-action'),false);
 });
 test('changing job discards cancellation confirmation', () => {
   const button=new Button(); const calls=[]; const control=new CancelButton(button,id=>calls.push(id));
@@ -35,4 +35,19 @@ test('changing job discards cancellation confirmation', () => {
   control.update('two'); button.dispatchEvent(new Event('click'));
   assert.deepEqual(calls,[]); assert.equal(button.textContent,'Подтвердить отмену');
   control.update(undefined);
+});
+
+test('cancel click cannot fall through to the download action', async () => {
+  const button = new Button();
+  const control = new CancelButton(button, () => {});
+  let downloads = 0;
+  button.addEventListener('click', () => downloads++);
+  control.update('one');
+  button.dispatchEvent(new Event('click'));
+  button.dispatchEvent(new Event('click'));
+  await new Promise(setImmediate);
+  assert.equal(downloads, 0);
+  control.update(undefined);
+  button.dispatchEvent(new Event('click'));
+  assert.equal(downloads, 1);
 });

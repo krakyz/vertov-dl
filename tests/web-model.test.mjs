@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { batchRows, normalizeLink, pasteRows, quality } from '../apps/web/src/model.ts';
+import { batchRows, normalizeLink, pasteRows, quality, downloadStatus, thumbnailBadge } from '../apps/web/src/model.ts';
 
 test('YouTube variants keep one video and remove playlist or mix context', () => {
   const id = 'jNQXAC9IVRw';
@@ -40,4 +40,25 @@ test('restoring pending metadata tolerates partial details without formats', () 
   }
   assert.equal(quality({formats: []}), 'Разрешение не указано');
   assert.equal(quality({formats: [{height: 360}, {height: 1080}]}), 'До 1080p');
+});
+
+
+test('status includes media type and only claims browser dispatch when requested', () => {
+  const job={kind:'download',preset:'best',details:null,state:'queued'};
+  assert.equal(downloadStatus(job),'Видео в очереди');
+  assert.equal(downloadStatus({...job,preset:'audio'}),'Аудио в очереди');
+  assert.equal(downloadStatus({...job,state:'completed'},true),'Готово! Видео отправлено в браузер');
+  assert.equal(downloadStatus({...job,state:'completed',preset:'audio'},true),'Готово! Аудио отправлено в браузер');
+  assert.equal(downloadStatus({...job,state:'completed'}),'Готово! Видео доступно для скачивания');
+  assert.equal(downloadStatus({...job,preset:'format:140',details:{formats:[{id:'140',vcodec:'none'}]},state:'processing'}),'Обработка аудио');
+});
+
+
+test('home thumbnail badge uses selection before download and actual resolution after processing', () => {
+  const details={formats:[{id:'v',height:1080,vcodec:'avc1',ext:'mp4'},{id:'a',height:null,vcodec:'none',ext:'m4a'}]};
+  assert.deepEqual(thumbnailBadge(undefined,details,{kind:'video',quality:'best'}),{kind:'video',label:'Видео · до 1080p'});
+  assert.equal(thumbnailBadge(undefined,details,{kind:'video',formatId:'a'}).label,'Аудио · M4A');
+  assert.equal(thumbnailBadge({preset:'audio',details},details,{kind:'video'}).label,'Аудио · MP3');
+  assert.equal(thumbnailBadge({preset:'best',details:{artifact_media:{width:1920,height:1080}}},details,{kind:'video'}).label,'Видео · 1920×1080');
+  assert.equal(thumbnailBadge(undefined,{}, {kind:'video'}).label,'Видео');
 });

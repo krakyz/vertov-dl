@@ -32,8 +32,8 @@ export const api = {
   login: (token: string) => request('/login', 'POST', { token }),
   logout: () => request('/logout', 'POST'),
   probe: (url: string, force = false) => request<Job>('/probes', 'POST', { url, force }),
-  download: (probe_id: string, selection: { preset: string } | { format_id: string }) =>
-    request<Job>('/downloads', 'POST', { probe_id, ...selection }),
+  download: (probe_id: string, selection: { preset: string } | { format_id: string }, replace_job_id?: string) =>
+    request<Job>('/downloads', 'POST', { probe_id, ...selection, ...(replace_job_id ? { replace_job_id } : {}) }),
   retry: (id: string) => request<Job>(`/jobs/${id}/retry`, 'POST'),
   cancel: (id: string) => request(`/jobs/${id}/cancel`, 'POST'),
   delete: (id: string) => request(`/jobs/${id}`, 'DELETE'),

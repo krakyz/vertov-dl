@@ -4,7 +4,7 @@ export type Format = {
   filesize?: number | null; filesize_approx?: number | null; protocol?: string;
 };
 export type Details = { artifact_media?: {media_type: 'video' | 'audio'; video_codec: string | null; audio_codec: string | null; width?: number | null; height?: number | null; fps?: number | null}; title?: string; duration?: number | null; formats?: Format[];
-  uploader?: string | null; has_thumbnail?: boolean; source_probe_id?: string };
+  uploader?: string | null; has_thumbnail?: boolean; conversion_source?: string; source_probe_id?: string };
 export type Job = {
   id: string; kind: 'probe' | 'download'; state: string; title: string; message: string;
   created: number; updated: number; preset: string; error_code: string | null; sha256: string | null;
@@ -14,13 +14,13 @@ export type Job = {
 export type CookieStatus = { state: string; expires_at: number | null; count?: number; valid_count?: number; session_count?: number };
 export type Runtime = { version: string; uptime_seconds: number;
   capabilities: { exact_formats: boolean; cookie_import?: boolean; queue_archive?: boolean; library?: boolean }; cookies: CookieStatus };
-export type MediaEntry = { url: string; probeId?: string; downloadId?: string; pending: boolean; sending?: boolean; error?: string };
+export type MediaEntry = { url: string; probeId?: string; downloadId?: string; pending: boolean; sending?: boolean; sendingKind?: 'video' | 'audio'; error?: string };
 export type LibraryItem = Job & { size: number; completed_at: number; expires_at: number };
 export type LibrarySnapshot = {items: LibraryItem[]; total_bytes: number; max_bytes: number; retention_hours: number};
 
 export const MAX_LINKS = 20;
 export const active = (job: Job) => ['queued', 'probing', 'downloading', 'processing'].includes(job.state);
-export const labels: Record<string, string> = { queued: 'В очереди', probing: 'Получение данных',
+export const labels: Record<string, string> = { queued: 'В очереди', probing: 'Получение метаданных',
   downloading: 'Загрузка', processing: 'Обработка', completed: 'Готово', failed: 'Ошибка', cancelled: 'Отменено', expired: 'Срок хранения истёк' };
 
 export function normalizeLink(value: string): string {
@@ -92,4 +92,43 @@ export function quality(details: Details | null) {
 export function jobError(job: Pick<Job, 'error_code' | 'message'>) {
   return ['authentication', 'challenge'].includes(job.error_code || '')
     ? 'Обновите файл cookies.txt в настройках и повторите загрузку.' : job.message;
+}
+
+
+export function mediaName(job: Pick<Job, 'preset' | 'details'>): 'Видео' | 'Аудио' {
+  const format = job.preset.startsWith('format:') ? job.details?.formats?.find(format=>format.id===job.preset.slice(7)) : undefined;
+  return job.preset==='audio' || job.details?.artifact_media?.media_type==='audio' || format?.vcodec==='none' ? 'Аудио' : 'Видео';
+}
+
+export function downloadStatus(job: Job, dispatched = false): string {
+  if(job.kind==='probe') return job.state==='queued' ? 'Метаданные в очереди' : labels[job.state] || job.state;
+  const media=mediaName(job), lower=media.toLowerCase();
+  switch(job.state) {
+    case 'queued': return `${media} в очереди`;
+    case 'probing': return `Получение метаданных ${lower}`;
+    case 'downloading': return `Загрузка ${lower}`;
+    case 'processing': return job.details?.conversion_source ? 'Конвертация видео в MP3' : `Обработка ${lower}`;
+    case 'completed': return dispatched ? `Готово! ${media} отправлено в браузер` : `Готово! ${media} доступно для скачивания`;
+    case 'failed': return `Ошибка загрузки ${lower}: ${jobError(job)}`;
+    case 'cancelled': return `Загрузка ${lower} отменена`;
+    case 'expired': return `${media}: ${job.message}`;
+    default: return labels[job.state] || job.state;
+  }
+}
+
+
+export function thumbnailBadge(job: Job | undefined, details: Details | null, choice: {kind: string; formatId?: string; quality?: string}) {
+  const formatId=job?.preset.startsWith('format:') ? job.preset.slice(7) : !job ? choice.formatId : undefined;
+  const format=details?.formats?.find(format=>format.id===formatId);
+  const audio=job ? mediaName(job)==='Аудио' : format ? format.vcodec==='none' : choice.kind==='audio';
+  if(audio) return {kind:'audio',label:format ? `Аудио · ${format.ext.toUpperCase()}` : 'Аудио · MP3'};
+  const media=job?.details?.artifact_media;
+  let resolution=media?.width && media.height ? `${media.width}×${media.height}` : format?.height ? `${format.height}p` : '';
+  if(!resolution) {
+    const limit=job?.preset || choice.quality || 'best';
+    const cap=['360','720','1080'].includes(limit) ? Number(limit) : Infinity;
+    const height=Math.max(0,...(details?.formats || []).map(format=>format.height || 0).filter(height=>height<=cap));
+    resolution=height ? `до ${height}p` : '';
+  }
+  return {kind:'video',label:['Видео',resolution].filter(Boolean).join(' · ')};
 }

@@ -1,3 +1,4 @@
+import { reconcileChildren, frameScheduler } from './rendering';
 import { LibraryView } from './library-view';
 import { confirmDelete } from './confirm-delete';
 import { WORKSPACE_KEY, readWorkspace } from './workspace';
@@ -18,6 +19,7 @@ let cookieStatusFresh = false;
 let layoutMotion: Animation | undefined;
 const entries = new Map<string, MediaEntry>(), cards = new Map<string, MediaCard>();
 const autoDownload = new AutoDownload();
+const dispatchedDownloads = new Set<string>();
 const queueEntries = new Map<string, MediaEntry>();
 const deleting = new Set<string>();
 let clearing = false;
@@ -32,13 +34,14 @@ if (restored) {
   values = restored.batch ? batchRows(restored.values) : [restored.values[0] || ''];
   savedBatch = restored.savedBatch; batch = restored.batch; advanced = restored.advanced;
   for (const entry of restored.entries) entries.set(entry.url, {...entry, pending:false});
+  for (const id of restored.dispatchedDownloads) dispatchedDownloads.add(id);
   for (const id of restored.pendingDownloads) autoDownload.watch(id);
 }
 function saveWorkspace() {
   try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify({version:1, values, savedBatch, batch, advanced,
     quality: element<HTMLSelectElement>('quality').value,
     entries: [...entries.values()].map(({url,probeId,downloadId}) => ({url,probeId,downloadId})),
-    pendingDownloads: autoDownload.snapshot()})); } catch {}
+    pendingDownloads: autoDownload.snapshot(), dispatchedDownloads:[...dispatchedDownloads].slice(-1000)})); } catch {}
 }
 let preferred = 'video';
 try { preferred = localStorage.getItem('vertovdl-format') === 'audio' ? 'audio' : 'video'; } catch {}
@@ -119,7 +122,10 @@ function failure(error: unknown, report = feedback) {
   if (error instanceof ApiError && error.status === 401) needLogin();
   report(error instanceof Error ? error.message : 'Не удалось выполнить запрос.');
 }
-function render() {
+const cardEntries = new WeakMap<MediaCard, MediaEntry>();
+const render = frameScheduler(renderNow);
+function renderNow() {
+  if (authenticated) autoDownload.update(jobs.values(), deliverFile);
   const panel = document.querySelector<HTMLElement>('.panel')!;
   const downloader = document.querySelector<HTMLElement>('.downloader')!;
   const compact = values.some(value => value.trim()) || jobs.size > 0;
@@ -137,25 +143,40 @@ function render() {
   const roots: HTMLElement[] = [];
   const makeCard = (key: string, entry: MediaEntry, probeJob?: Job, downloadJob?: Job, job?: Job) => {
     if (!cards.has(key)) {
-      const card = new MediaCard({download: (kind,id) => void download(entry,kind,id),
-        refresh: () => { if (entry.url) void probe(entry,true); else feedback('Для обновления данных введи ссылку заново.'); },
+      const currentEntry = () => cardEntries.get(card)!;
+      const card = new MediaCard({download: (kind,id) => void download(currentEntry(),kind,id),
+        refresh: () => { const entry = currentEntry(); if (entry.url) void probe(entry,true); else feedback('Для обновления данных введи ссылку заново.'); },
         cancel: id => cancel(id), retry: id => void retry(id)});
-      if (job) {
-        const meta = node('div',undefined,'queue-card-meta');
-        meta.append(node('span',job.kind === 'probe' ? 'Метаданные' : job.preset === 'audio' ? 'MP3' : 'Видео'));
-        const remove = node('button','Скрыть','queue-remove'); remove.type='button';
-        remove.addEventListener('click',() => void deleteJob(job.id)); meta.append(remove);
-        card.root.prepend(meta);
+      {
+        const remove = node('button','×','queue-remove'); remove.type='button';
+        remove.addEventListener('click',() => { const id = card.root.dataset.jobId; if (id) void deleteJob(id); });
+        card.root.querySelector('.media-heading')!.append(remove);
       }
       cards.set(key,card);
     }
     const card = cards.get(key)!;
-    card.update(entry,probeJob,downloadJob,{advanced,exact:Boolean(runtime?.capabilities.exact_formats),authenticated,preferred,
+    cardEntries.set(card, entry);
+    card.root.querySelector<HTMLButtonElement>('.queue-remove')!.hidden = !job;
+    card.update(entry,probeJob,downloadJob,{advanced,exact:Boolean(runtime?.capabilities.exact_formats),authenticated,preferred,quality:element<HTMLSelectElement>('quality').value,
+      dispatched: Boolean(downloadJob && dispatchedDownloads.has(downloadJob.id)),
       canDownload: !job || Boolean(entry.probeId && probeJob?.state === 'completed')});
     if (job) {
+      card.root.dataset.jobId = job.id;
       const remove = card.root.querySelector<HTMLButtonElement>('.queue-remove')!;
       remove.disabled = !authenticated || !runtime?.capabilities.queue_archive || active(job) || clearing || deleting.has(job.id);
-      remove.textContent=job.kind==='download' && job.state==='failed' ? 'Удалить' : 'Скрыть';
+      const failedDownload = job.kind==='download' && job.state==='failed';
+      if (remove.dataset.mode !== (failedDownload ? 'delete' : 'hide')) {
+      remove.dataset.mode = failedDownload ? 'delete' : 'hide';
+      remove.replaceChildren();
+      if (failedDownload) remove.textContent = 'Удалить';
+      else {
+        const icon = document.createElement('img');
+        icon.src = 'assets/594c9.svg'; icon.width = 17; icon.height = 17; icon.alt = '';
+        remove.append(icon);
+      }
+      }
+      remove.classList.toggle('queue-remove-icon', !failedDownload);
+      remove.setAttribute('aria-label', failedDownload ? 'Удалить загрузку и временные файлы' : 'Скрыть задачу');
       remove.title = active(job) ? 'Сначала отмените задачу' : job.kind==='download' && job.state==='failed' ? 'Удалить загрузку и временные файлы' : 'Убрать запись из списка; файл останется в библиотеке';
     }
     roots.push(card.root);
@@ -175,13 +196,13 @@ function render() {
     const entry=entries.get(url)!;
     if (!entry.probeId && (entry.pending || entry.error)) makeCard(`draft:${url}`,entry);
   }
-  for (const [key,card] of cards) if (!roots.includes(card.root)) cards.delete(key);
+  for (const [key,card] of cards) if (!roots.includes(card.root)) { card.dispose(); cards.delete(key); }
   for (const id of queueEntries.keys()) if (!jobs.has(id)) queueEntries.delete(id);
   element('queue-toolbar').hidden = !jobs.size;
   element('queue-count').textContent = `Задач: ${jobs.size}`;
   element<HTMLButtonElement>('clear-jobs').disabled = clearing || !authenticated || !runtime?.capabilities.queue_archive || ![...jobs.values()].some(job => !active(job));
   const results = element('results');
-  if (roots.length !== results.children.length || roots.some((root, i) => results.children[i] !== root)) results.replaceChildren(...roots);
+  reconcileChildren(results, roots);
   document.querySelector('.panel')!.classList.toggle('has-results', roots.length > 0);
   if (currentView === 'home' && previousTop !== undefined && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const offset = previousTop - downloader.getBoundingClientRect().top;
@@ -189,13 +210,12 @@ function render() {
       { duration: 240, easing: 'cubic-bezier(.2,.7,.2,1)' });
   }
   queue.update([...jobs.values()].sort((a, b) => b.created - a.created));
-  if (authenticated) autoDownload.update(jobs.values(), deliverFile);
   saveWorkspace();
 }
 function deliverFile(job: Job) {
   const link=document.createElement('a');link.href=`/api/jobs/${encodeURIComponent(job.id)}/file`;
   link.download='';link.hidden=true;document.body.append(link);
-  try {saveWorkspace();link.click();feedback('Загрузка готового файла передана браузеру.');}
+  try {saveWorkspace();link.click();dispatchedDownloads.add(job.id);saveWorkspace();}
   finally {link.remove();}
 }
 function rememberJob(job: Job) {
@@ -207,7 +227,12 @@ async function probe(entry: MediaEntry, force = false) {
   if (entry.pending) return;
   if (!authenticated) { needLogin(); return; }
   entry.pending = true; entry.error = undefined; render();
-  try { const job = await api.probe(entry.url,force); entry.probeId = job.id; entry.downloadId = undefined;
+  try { const previousKey = entry.probeId ? `job:${entry.probeId}` : `draft:${entry.url}`;
+    const job = await api.probe(entry.url,force);
+    const previousCard = cards.get(previousKey);
+    if (previousCard && !cards.has(`job:${job.id}`)) { cards.delete(previousKey); cards.set(`job:${job.id}`, previousCard); }
+    queueEntries.set(job.id,entry);
+    entry.probeId = job.id; entry.downloadId = undefined;
     const linked=entries.get(entry.url); if (linked) { linked.probeId=job.id; linked.downloadId=undefined; } rememberJob(job); }
   catch (error) { entry.error = error instanceof Error ? error.message : 'Ошибка запроса'; failure(error); }
   finally { entry.pending = false; render(); }
@@ -282,15 +307,56 @@ function rows(focus?: number) {
 }
 async function download(entry: MediaEntry, kind: 'video' | 'audio', id: string) {
   if (!entry.probeId || entry.sending) return;
-  entry.sending = true; entry.error = undefined; render();
+  entry.sendingKind=kind==='audio' || (id && jobs.get(entry.probeId || '')?.details?.formats?.find(format=>format.id===id)?.vcodec==='none') ? 'audio' : 'video'; entry.sending = true; entry.error = undefined; render();
   const selection = kind === 'video' && advanced && runtime?.capabilities.exact_formats && id
     ? { format_id: id } : { preset: kind === 'audio' ? 'audio' : element<HTMLSelectElement>('quality').value };
-  try { const job = await api.download(entry.probeId, selection); entry.downloadId = job.id; jobs.delete(entry.probeId); const linked=entries.get(entry.url); if (linked) linked.downloadId=job.id; autoDownload.watch(job.id); rememberJob(job); }
+  try { const stopped = entry.downloadId && jobs.get(entry.downloadId)?.state === 'cancelled' ? entry.downloadId : undefined;
+    const job = await api.download(entry.probeId, selection, stopped); entry.downloadId = job.id;
+    const previousCard = cards.get(`job:${entry.probeId}`);
+    if (previousCard && !cards.has(`job:${job.id}`)) {
+      cards.delete(`job:${entry.probeId}`);
+      cards.set(`job:${job.id}`, previousCard);
+    }
+    queueEntries.set(job.id, entry);
+    jobs.delete(entry.probeId); const linked=entries.get(entry.url); if (linked) linked.downloadId=job.id; autoDownload.watch(job.id); rememberJob(job); }
   catch (error) { entry.error = (error as Error).message; failure(error); }
   finally { entry.sending = false; render(); }
 }
 async function refreshJobs() { jobs = new Map((await api.jobs()).map(job => [job.id, job])); render(); }
-async function cancel(id: string) { try { await api.cancel(id); await refreshJobs(); } catch (error) { failure(error); } }
+async function cancel(id: string) {
+  const metadata = jobs.get(id)?.kind === 'probe';
+  const card = cards.get(`job:${id}`);
+  let motion: Animation | undefined;
+  try {
+    await api.cancel(id);
+    if (metadata) {
+      if (card && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const height = card.root.getBoundingClientRect().height;
+        motion = card.root.animate([
+          {opacity:1,transform:'translateY(0)',height:`${height}px`,overflow:'hidden'},
+          {opacity:0,transform:'translateY(-8px)',height:`${height}px`,overflow:'hidden',offset:.45},
+          {opacity:0,transform:'translateY(-8px)',height:'0px',marginBottom:'-16px',overflow:'hidden'}
+        ], {duration:260,easing:'cubic-bezier(.2,.7,.2,1)',fill:'forwards'});
+      }
+      card?.root.classList.add('removing');
+      // The server can still be terminating the probe subprocess after cancel returns.
+      const dismiss = async () => {
+        for (let attempt=0;;attempt++) {
+          try { await api.delete(id); return; }
+          catch (error) {
+            if (!(error instanceof ApiError) || error.status!==409 || attempt>=19) throw error;
+            await new Promise(resolve=>setTimeout(resolve,250));
+          }
+        }
+      };
+      await Promise.all([dismiss(), motion?.finished.catch(()=>{})]);
+      forgetJob(id); rows(); render();
+    }
+    await refreshJobs();
+  } catch (error) {
+    motion?.cancel(); card?.root.classList.remove('removing'); failure(error); await refreshJobs().catch(()=>{});
+  }
+}
 async function retry(id: string) {
   try {
     const job = await api.retry(id);
@@ -305,7 +371,7 @@ async function retry(id: string) {
   } catch (error) { failure(error); }
 }
 function forgetJob(id: string) {
-  jobs.delete(id); queueEntries.delete(id); autoDownload.forget(id);
+  dispatchedDownloads.delete(id); jobs.delete(id); queueEntries.delete(id); autoDownload.forget(id);
   for (const [url,entry] of entries) {
     if (entry.probeId === id) {
       entries.delete(url);
@@ -356,7 +422,7 @@ async function refreshLibrary() {
     libraryData=await api.library();
     libraryData.items=libraryData.items.filter(item=>!removedLibraryFiles.has(item.id));
     libraryData.total_bytes=libraryData.items.reduce((sum,item)=>sum+item.size,0);
-    autoDownload.update(libraryData.items,deliverFile);saveWorkspace();
+    autoDownload.update(libraryData.items,deliverFile);render();saveWorkspace();
     libraryView.update(libraryData,libraryDeleting);
   } catch(error) { failure(error, libraryFeedback); }
   finally { libraryLoading=false;element('library-list').setAttribute('aria-busy','false');if(currentView==='library' && libraryData?.items.some(item=>active(item))) setTimeout(()=>{if(currentView==='library') void refreshLibrary();},1500); }
@@ -423,8 +489,8 @@ async function sessionAction() {
   try {
     await api.logout(); events?.close(); events = null; authenticated = false; runtime = null;
     clearTimeout(timer); savedBatch = [];
-    autoDownload.clear(); queueEntries.clear(); libraryData=undefined;element('library-list').replaceChildren();showView('home');
-    jobs.clear(); entries.clear(); cards.clear(); values = ['']; rows(); render(); sessionUI();
+    autoDownload.clear(); dispatchedDownloads.clear(); queueEntries.clear(); libraryData=undefined;element('library-list').replaceChildren();showView('home');
+    jobs.clear(); entries.clear(); for (const card of cards.values()) card.dispose(); cards.clear(); values = ['']; rows(); render(); sessionUI();
     serverStatus('Требуется вход', 'neutral'); element('cookie-lifetime').textContent = 'Нет данных'; feedback(); libraryFeedback(); needLogin();
   } catch (error) { failure(error); }
 }
@@ -484,7 +550,7 @@ if (restored) {
   document.querySelector('.panel')!.classList.toggle('batch-results',batch);
   element('advanced').setAttribute('aria-expanded',String(advanced)); element('advanced-options').hidden=!advanced;
 }
-element('quality').addEventListener('change',saveWorkspace);
+element('quality').addEventListener('change',()=>{saveWorkspace();render();});
 rows(); sessionUI(); render();
 void connect().catch(error => { serverStatus('Нет подключения', 'error'); failure(error); });
 setInterval(() => void status(), 30000);

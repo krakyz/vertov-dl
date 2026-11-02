@@ -23,3 +23,12 @@ test('invalid or oversized browser storage cannot restore arbitrary state', () =
   const restored=readWorkspace(JSON.stringify({version:1,values:[''],entries:[{url:'https://example.org',probeId:'bad'}],pendingDownloads:['bad']}));
   assert.equal(restored.entries[0].probeId,undefined); assert.deepEqual(restored.pendingDownloads,[]);
 });
+
+
+test('browser dispatch history survives reload without restoring invalid IDs', () => {
+  const id='a'.repeat(32);
+  const result=readWorkspace(JSON.stringify({version:1,values:[''],entries:[],dispatchedDownloads:[id,'invalid']}));
+  assert.deepEqual(result.dispatchedDownloads,[id]);
+  assert.deepEqual(result.pendingDownloads,[]);
+  assert.deepEqual(readWorkspace(JSON.stringify({version:1,values:[''],entries:[]})).dispatchedDownloads,[]);
+});

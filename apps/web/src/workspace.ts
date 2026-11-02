@@ -2,7 +2,7 @@ export const WORKSPACE_KEY = 'vertovdl-workspace-v1';
 export type Workspace = {
   version: 1; values: string[]; savedBatch: string[]; batch: boolean; advanced: boolean;
   quality: string; entries: {url: string; probeId?: string; downloadId?: string}[];
-  pendingDownloads: string[];
+  pendingDownloads: string[]; dispatchedDownloads: string[];
 };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 export function readWorkspace(raw: string | null): Workspace | undefined {
@@ -19,6 +19,7 @@ export function readWorkspace(raw: string | null): Workspace | undefined {
       quality: ['best', '1080', '720', '360'].includes(data.quality) ? data.quality : 'best',
       entries: data.entries.slice(0, 1000).filter((item: any) => item && typeof item.url === 'string' && item.url.length <= 4096)
         .map((item: any) => ({url:item.url, probeId:validId(item.probeId) ? item.probeId : undefined, downloadId:validId(item.downloadId) ? item.downloadId : undefined})),
+      dispatchedDownloads: Array.isArray(data.dispatchedDownloads) ? data.dispatchedDownloads.filter(validId).slice(-1000) : [],
       pendingDownloads: Array.isArray(data.pendingDownloads) ? data.pendingDownloads.filter(validId).slice(0, 1000) : [],
     };
   } catch { return; }

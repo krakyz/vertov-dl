@@ -147,3 +147,43 @@ def test_resume_failed_preserves_parts_and_delete_removes_them(client, tmp_path)
     assert not folder.exists()
     assert client.get("/api/jobs").json() == []
     assert client.post(f"/api/jobs/{job['id']}/retry").status_code == 409
+
+
+@pytest.mark.parametrize(
+    "original,selected", [("audio", "720"), ("720", "audio"), ("audio", "audio")]
+)
+def test_cancelled_download_reuses_task_when_selecting_media(client, original, selected):
+    login(client)
+    store = client.app.state.store
+    parent = store.create("probe", "https://example.org/restart")
+    store.update(parent["id"], state="completed", details={"formats": []})
+    old = store.create("download", parent["source"], original)
+    store.update(old["id"], state="cancelled", progress={"downloaded": 5}, error_code="old")
+    count = len(store.all())
+    response = client.post(
+        "/api/downloads",
+        json={"probe_id": parent["id"], "replace_job_id": old["id"], "preset": selected},
+    )
+    assert response.status_code == 202
+    assert response.json()["id"] == old["id"]
+    assert len(store.all()) == count
+    result = store.get(old["id"])
+    assert result["preset"] == selected and result["state"] == "queued"
+    assert result["progress"] is None and result["error_code"] is None
+    assert (
+        client.post(
+            "/api/downloads",
+            json={"probe_id": parent["id"], "replace_job_id": old["id"], "preset": selected},
+        ).status_code
+        == 409
+    )
+
+
+def test_cancelled_download_retry_keeps_id(client):
+    login(client)
+    store = client.app.state.store
+    old = store.create("download", "https://example.org/retry", "audio")
+    store.update(old["id"], state="cancelled")
+    response = client.post(f"/api/jobs/{old['id']}/retry")
+    assert response.status_code == 202
+    assert response.json()["id"] == old["id"]
