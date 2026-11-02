@@ -1,0 +1,22 @@
+{
+  "packages": {
+    "ffmpeg": "7:7.1.5-0+deb13u1",
+    "libavcodec61": "7:7.1.5-0+deb13u1",
+    "libavformat61": "7:7.1.5-0+deb13u1",
+    "libavutil59": "7:7.1.5-0+deb13u1"
+  },
+  "security_check": {
+    "cve": "CVE-2026-8461",
+    "method": "Debian trixie security-backport version floor checked with dpkg",
+    "minimum_fixed": "7:7.1.5-0+deb13u1",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-8461"
+  },
+  "suite": "trixie",
+  "tested_at": "2026-11-02",
+  "image": "vertov-dl:issue-9",
+  "image_id": "sha256:7f51e85d4595dfd99f6bf4c75289bc588998d735a401e8e2bbfde357992c7fc1",
+  "dockerfile_sha256": "6b2c78bca79c05d668aecdd537735b15a94f414817a60f783c9a4043451b0386",
+  "container_pytest_passed": 89,
+  "windows_targeted_pytest_passed": 11,
+  "malicious_sample_used": false
+}

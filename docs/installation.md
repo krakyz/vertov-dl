@@ -9,7 +9,7 @@ Linux Docker Engine + Compose v2, SOCKS5 на хосте и достаточно
 ```bash
 python3 scripts/generate-token.py
 docker compose config --quiet
-docker compose build
+docker compose build --pull
 docker compose up -d
 docker compose ps
 ```
@@ -33,7 +33,7 @@ docker compose run --rm --no-deps --user 0 --entrypoint tar app -C /data -czf - 
 
 ```bash
 docker compose stop
-docker compose build
+docker compose build --pull
 docker compose up -d
 docker compose ps
 ```
@@ -49,3 +49,5 @@ docker compose ps
 MEDIA_LIBRARY_MAX_BYTES=10737418240, MEDIA_RETENTION_HOURS=720; MEDIA_TEMPORARY_MAX_BYTES=10737418240, MEDIA_TEMPORARY_RETENTION_HOURS=168. Старые ошибочные части вытесняются первыми, активные задачи не удаляются. Проверка раз в 5 секунд, жёсткую квоту файловой системы это не заменяет.
 
 При остановке активные процессы завершаются; queued сохраняются. Прерванный download становится failed и может продолжиться с тем же каталогом. Отмена пользователем очищает части. Совместимость формата проверяется перед использованием старых частей.
+
+Native-обновления требуют нового образа: копирование Python-исходников/source-overlay не меняет FFmpeg/libavcodec. Сборка проверяет минимальную исправленную версию по CVE-2026-8461; после сборки запустите python scripts/check-image.py vertov-dl:0.1.0-alpha.1. Проверка относится к этой CVE и не заменяет регулярное обновление/аудит зависимостей.

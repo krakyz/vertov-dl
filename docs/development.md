@@ -81,3 +81,9 @@ Frontend build и 18 Node-тестов успешны, включая валид
 Браузерный fixture: перезагрузка с queued/probing partial details не падает; фильтр видео, полный/частичный выбор, выход при нуле, zoom и исчезновение overlay после ухода мыши работают. Центры типа и checkbox имеют разницу 0 px, высота типа 19 px. На 390 px page width=viewport width, одна колонка; ошибок JS=0. Скачивание fixture-файла работает. Разрыв связи даёт красный индикатор, восстановление возвращает зелёный. Тестовые вкладки/сервер закрыты. Снимок проверки хранится вне репозитория как outputs/vertov-dl-alpha-ui.png.
 
 Новый локальный репозиторий без origin; секреты/данные не экспортируются. Python module media_loader и cookie-контекст сохранены намеренно. Тестовый сервер использует runtime-overlay dbb23d55c76a поверх прежнего образа, а новый полный образ отдельно проверен локально. Это не публичная публикация.
+
+## Issue #9: native FFmpeg
+
+Сборка: docker build --pull -t vertov-dl:issue-9 .; smoke: python scripts/check-image.py vertov-dl:issue-9. Smoke выводит реальные dpkg-версии и способ проверки CVE-2026-8461. Для контейнерных pytest монтируются tests и scripts; пакет приложения и native-компоненты берутся из образа. Безопасный тест MagicYUV проверяет достижимость исправленного декодера через настоящий fallback без эксплуатации уязвимости.
+
+Результат issue #9: образ vertov-dl:issue-9 собран на python:3.12-slim-trixie; реальные ffmpeg/libavcodec61/libavformat61/libavutil59 имеют версию 7:7.1.5-0+deb13u1. Smoke повторно подтвердил native policy и health/UI. Все 89 pytest прошли внутри образа при --network none, read-only root, cap_drop ALL, non-root; 11 целевых тестов прошли на Windows. Проверены remux, fallback, корректный MagicYUV и MP3-конвертация. Отчёт: security-checks/issue-9.json. Серверный образ этим изменением автоматически не заменяется; Python source-overlay не обновляет FFmpeg.

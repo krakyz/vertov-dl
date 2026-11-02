@@ -8,7 +8,7 @@ RUN npm run build
 
 FROM denoland/deno:2.9.8 AS deno
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-trixie
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     MEDIA_DATA_DIR=/data MEDIA_WEB_DIR=/app/web \
     MEDIA_FFMPEG_LOCATION=/opt/media-tools \
@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 10001 media && useradd -u 10001 -g media -M media \
     && mkdir -p /data /opt/media-tools && chown media:media /data
+COPY scripts/check-native.py /opt/media-tools/check-native.py
+RUN python /opt/media-tools/check-native.py > /opt/media-tools/native-security.json
 COPY --from=deno /usr/bin/deno /usr/local/bin/deno
 WORKDIR /app
 LABEL org.opencontainers.image.title="vertov-dl" org.opencontainers.image.version="0.1.0-alpha.1" org.opencontainers.image.licenses="MPL-2.0"

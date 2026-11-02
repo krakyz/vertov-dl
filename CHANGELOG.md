@@ -1,5 +1,12 @@
 # Журнал изменений
 
+## Исправление native FFmpeg — issue #9, 2026-11-02
+
+- Runtime переведён на Debian trixie; сборка требует исправленный FFmpeg/libavcodec для CVE-2026-8461 (минимум 7:7.1.5-0+deb13u1 по Debian tracker).
+- Добавлена проверка установленных пакетов при build и smoke, отчёт native-security.json, регрессия корректного MagicYUV через штатный fallback.
+- Документация явно разделяет protocol whitelist и изоляцию от ошибок native decoder.
+
+
 ## 0.1.0-alpha.1 — подготовка локального выпуска, 2026-11-02
 
 - Название продукта vertov-dl, версия 0.1.0-alpha.1 (Python distribution: 0.1.0a1), MPL-2.0 и сторонние notices.

@@ -21,3 +21,5 @@ apps/web/node_modules/
 
 !LICENSES/
 !LICENSES/**
+
+!scripts/check-native.py

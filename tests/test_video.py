@@ -87,3 +87,46 @@ def test_exact_audio_is_not_converted_to_video():
         info = {"vcodec": "none", "ext": "m4a", "filepath": "synthetic.m4a"}
         discarded, result = MP4VideoPP(downloader).run(info)
     assert not discarded and result == info
+
+
+def test_valid_magicyuv_transcodes_through_actual_fallback(tmp_path, monkeypatch):
+    from media_loader.video import CompatibleMP4PP
+
+    location = os.environ.get("MEDIA_FFMPEG_LOCATION")
+    ffmpeg = str(Path(location) / "ffmpeg") if location else shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("ffmpeg required")
+    source = tmp_path / "media.avi"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=32x32:rate=1:duration=1",
+            "-c:v",
+            "magicyuv",
+            "-threads",
+            "1",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    )
+    original = CompatibleMP4PP.run
+    reached = []
+
+    def tracked(self, info):
+        reached.append(info["vcodec"])
+        return original(self, info)
+
+    monkeypatch.setattr(CompatibleMP4PP, "run", tracked)
+    with yt_dlp.YoutubeDL({"quiet": True, "ffmpeg_location": location}) as downloader:
+        _, result = MP4VideoPP(downloader).run(
+            {"filepath": str(source), "ext": "avi", "vcodec": "magicyuv", "acodec": "none"}
+        )
+    assert reached == ["magicyuv"]
+    assert inspect_artifact(Path(result["filepath"]))["video_codec"] == "h264"

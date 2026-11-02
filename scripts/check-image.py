@@ -33,6 +33,13 @@ try:
         check=True,
         capture_output=True,
     )
+    native = subprocess.run(
+        ["docker", "exec", name, "python", "/opt/media-tools/check-native.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    print(native.stdout.strip())
     check = "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:47831/healthz',timeout=2)); assert r['version']=='0.1.0-alpha.1'; assert 'vertov-dl' in urllib.request.urlopen('http://127.0.0.1:47831/').read().decode(); print(json.dumps(r))"
     for attempt in range(30):
         result = subprocess.run(
