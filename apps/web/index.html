@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#1c1c1e">
+  <meta name="description" content="vertov-dl — загрузчик медиа. Вставь ссылку — получи файл.">
+  <title>vertov-dl</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Боковая панель">
+      <div>
+        <a class="brand" href="./" aria-label="vertov-dl — главная">
+          <span class="version" id="version">локально</span>
+          <span class="brand-row"><span class="brand-icon">↓</span><span>vertov-dl</span></span>
+        </a>
+        <nav>
+          <button class="nav-item active" id="home" aria-current="page"><span class="nav-icon blue"><img src="assets/c1a68.svg" width="12" height="12" alt=""></span>Главная</button>
+          <button class="nav-item" id="library"><span class="nav-icon library-icon"><img src="assets/library.svg" width="12" height="12" alt=""></span>Библиотека</button>
+          <button class="nav-item" id="settings"><span class="nav-icon orange"><img src="assets/f6367.svg" width="12" height="12" alt=""></span>Настройки</button>
+        </nav>
+      </div>
+      <div class="sidebar-bottom">
+        <div class="status"><div><strong>Сервер</strong><span id="server-uptime">Подключение…</span></div><span id="server-indicator" role="img" data-tone="warning" aria-label="Подключение"></span></div>
+        <div class="status cookies"><div><strong>Cookies</strong><span id="cookie-lifetime">Нет данных</span></div><span id="cookie-indicator" role="img" data-tone="neutral" aria-label="Нет данных"></span></div>
+        <button class="logout" id="logout">Выйти</button>
+      </div>
+    </aside>
+    <main class="panel"><div id="cookie-drop-hint" hidden>Отпусти cookies.txt для импорта</div>
+      <section id="home-view" class="downloader" aria-labelledby="title">
+        <h1 id="title">Вставь ссылку – получи файл</h1>
+        <form id="download-form" novalidate>
+          <div class="download-controls">
+          <div class="input-shell" id="links-box" aria-label="Ссылки на медиа"></div>
+          <div class="modes">
+            <button class="mode" type="button" id="batch" aria-pressed="false"><img src="assets/6a143.svg" width="12" height="12" alt=""><span id="batch-label">Много ссылок сразу</span></button>
+            <button class="mode" type="button" id="advanced" aria-expanded="false"><img src="assets/0c228.svg" width="12" height="12" alt="">Продвинутый режим</button>
+          </div>
+          </div>
+          <div id="advanced-options" class="advanced-options" hidden>
+            <label>Формат<select id="format"><option value="video">Видео</option><option value="audio">Аудио</option></select></label>
+            <label>Качество<select id="quality"><option value="best">Лучшее доступное</option><option value="1080">1080p</option><option value="720">720p</option><option value="360">360p</option></select></label>
+          </div>
+          <p id="feedback" class="feedback" role="status" hidden></p>
+          <div id="queue-toolbar" hidden><span id="queue-count"></span><button id="clear-jobs" class="inline-action" type="button">Очистить завершённые</button></div>
+          <div id="results" class="results" aria-label="Медиа для скачивания" aria-live="polite"></div>
+        </form>
+      </section>
+      <section id="library-view" class="library-view" aria-label="Библиотека" hidden>
+        <div class="library-toolbar" role="toolbar" aria-label="Выделение файлов"><div class="library-toolbar-top"><span id="library-selected-summary" role="status" hidden></span><div id="library-selection-actions" hidden><button id="library-download-selected" class="library-bulk-action" type="button" aria-label="Скачать выделенные" title="Скачать выделенные"><img src="assets/library-download.svg" alt=""></button><button id="library-delete-selected" class="library-bulk-action" type="button" aria-label="Удалить выделенные" title="Удалить выделенные"><img src="assets/library-trash.svg" alt=""></button></div><div id="library-selection-count" class="library-filters"><details class="library-filter" id="library-filter-type"><summary><span>Тип</span><span class="filter-chevron" aria-hidden="true"></span></summary><div class="library-filter-menu"><p>Тип</p><label><input type="radio" name="library-type" value="all" checked><span>Все типы</span></label><label><input type="radio" name="library-type" value="video"><span>Видео</span></label><label><input type="radio" name="library-type" value="audio"><span>Аудио</span></label></div></details><details class="library-filter" id="library-filter-date"><summary><span>Дата скачивания</span><span class="filter-chevron" aria-hidden="true"></span></summary><div class="library-filter-menu"><p>Дата скачивания</p><label><input type="radio" name="library-date" value="all" checked><span>За всё время</span></label><label><input type="radio" name="library-date" value="today"><span>Сегодня</span></label><label><input type="radio" name="library-date" value="7"><span>Последние 7 дней</span></label><label><input type="radio" name="library-date" value="30"><span>Последние 30 дней</span></label></div></details></div></div><label class="library-select-all"><input id="library-select-all" class="library-checkbox" type="checkbox" aria-label="Выделить все файлы"></label></div>
+        <div id="library-list" class="library-list" aria-label="Готовые файлы"></div>
+      </section>
+    </main>
+  </div>
+  <dialog id="settings-dialog"><form method="dialog"><h2>Настройки</h2><label>Формат по умолчанию<select id="default-format"><option value="video">Видео</option><option value="audio">Аудио</option></select></label><p class="muted">Выбор сохраняется в этом браузере. Аудио конвертируется в MP3 на сервере.</p><button id="settings-session" type="button" class="inline-action">Войти</button><section class="cookie-settings" aria-labelledby="cookies-title"><h3 id="cookies-title">Cookies</h3><p id="cookies-summary" class="muted">Нет данных</p><label class="cookie-picker">Импортировать cookies.txt<input id="cookies-file" type="file" accept=".txt,text/plain"></label><p class="muted">Netscape cookies.txt, до 256 КиБ. Можно перетащить файл на главную. Новый файл заменяет предыдущий; применяется к новым задачам. Хранится зашифрованным на сервере.</p><button id="cookies-delete" class="inline-action" type="button" disabled>Удалить cookies</button><p id="cookies-feedback" role="status" class="muted" hidden></p></section><h3>Задачи на сервере</h3><div id="settings-queue"></div><p class="muted"><a href="credits.html" target="_blank" rel="noopener">vertov-dl · MPL 2.0 · Лицензии компонентов</a></p><button class="submit">Готово</button></form></dialog>
+  <dialog id="auth-dialog"><form id="auth-form"><h2>Вход на сервер</h2><label>Ключ доступа<input id="auth-token" type="password" required autocomplete="current-password"></label><p id="auth-error" role="alert" class="failure" hidden></p><button id="auth-submit" class="submit">Войти</button><button id="auth-close" type="button" class="inline-action">Закрыть</button></form></dialog>
+  <template id="link-row-template"><div class="link-row"><span class="row-marker"><img class="search" src="assets/df516.svg" width="16" height="16" alt=""><span class="row-number" hidden></span></span><input type="url" class="link-input" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" spellcheck="false"><button class="paste" type="button">Ctrl + V</button><button class="clear" type="button" hidden><img src="assets/594c9.svg" width="17" height="17" alt=""></button></div></template>
+  <template id="card-template"><article class="media-card"><div class="card-progress" role="progressbar" aria-label="Прогресс задачи" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div><div class="media-info"><button class="thumbnail" type="button" disabled aria-label="Открыть превью"><img class="thumbnail-image" alt="" hidden><span class="thumbnail-fallback">↓</span><span class="duration library-duration" hidden></span></button><div class="media-details"><h2 class="media-title"><span class="media-name"></span><span class="media-author"></span></h2><p class="quality"></p></div></div><div class="card-options" hidden><label>Формат из yt-dlp<select class="format-choice"><option value="">По пресету качества</option></select></label><p class="exact-note muted" hidden>Сервер поддерживает только пресеты.</p><p class="muted">Выбранный видеопоток сохраняется в MP4 и может быть без звука.</p><button class="refresh-data inline-action" type="button">Обновить данные</button></div><div class="download-actions"><button class="download-audio" type="button">Скачать MP3</button><button class="download-video" type="button">Скачать видео</button></div><p class="download-status" role="status" hidden></p><div class="job-output"></div></article></template>
+  <div id="library-feedback" class="toast" hidden><p id="library-toast-message" role="status" aria-live="polite" aria-atomic="true"></p><button id="library-toast-close" type="button" aria-label="Закрыть уведомление">×</button></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

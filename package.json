@@ -1,0 +1,16 @@
+{
+  "name": "vertov-dl",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web",
+    "preview": "npm run preview -w apps/web",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "license": "MPL-2.0"
+}

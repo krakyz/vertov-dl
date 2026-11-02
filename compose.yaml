@@ -1,0 +1,41 @@
+name: vertov-dl
+services:
+  app:
+    build: .
+    image: vertov-dl:0.1.0-alpha.1
+    network_mode: host
+    environment:
+      MEDIA_HOST: "127.0.0.1"
+      MEDIA_PORT: "47831"
+      MEDIA_PROXY_URL: "socks5h://127.0.0.1:20170"
+      MEDIA_REQUIRE_PROXY: "true"
+      MEDIA_DATA_DIR: "/data"
+      MEDIA_TEMPORARY_RETENTION_HOURS: "168"
+      MEDIA_TEMPORARY_MAX_BYTES: "10737418240"
+      MEDIA_RETENTION_HOURS: "720"
+      MEDIA_LIBRARY_MAX_BYTES: "10737418240"
+      MEDIA_AUTH_TOKEN_FILE: "/run/secrets/media_auth_token"
+    secrets:
+      - media_auth_token
+    volumes:
+      - media-data:/data
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+secrets:
+  media_auth_token:
+    file: ./deploy/secrets/media_auth_token.txt
+volumes:
+  media-data:
