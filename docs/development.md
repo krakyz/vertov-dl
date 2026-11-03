@@ -11,7 +11,7 @@ pytest -q
 npm ci
 npm run build
 node --test tests/web-model.test.mjs tests/cookie-drop.test.mjs
-docker build -t vertov-dl:0.1.0-alpha.1 .
+docker build -t vertov-dl:0.1.0-alpha.2 .
 ```
 
 requirements.lock фиксирует версии всего тестового окружения, включая pytest/ruff. В текущем образе они тоже установлены; разделение production/dev lock — дальнейшее уменьшение образа. Для разработки без lock есть extra test в pyproject.toml, но результат может отличаться по версиям.
@@ -70,7 +70,7 @@ Frontend build и 18 Node-тестов успешны, включая валид
 
 ## Проверки alpha.1
 
-Текущие команды: pytest -q; npm test; npm run build; ruff check apps/api tests scripts; ruff format --check apps/api tests scripts; docker build -t vertov-dl:0.1.0-alpha.1 .; python scripts/check-image.py vertov-dl:0.1.0-alpha.1.
+Текущие команды: pytest -q; npm test; npm run build; ruff check apps/api tests scripts; ruff format --check apps/api tests scripts; docker build -t vertov-dl:0.1.0-alpha.2 .; python scripts/check-image.py vertov-dl:0.1.0-alpha.2.
 
 Браузерные проверки проводятся на отдельном fixture-экземпляре с синтетическими данными, без вмешательства в рабочую библиотеку. Фактический сетевой обрыв/Range проверяется реальным HTTP downloader yt-dlp через два независимых процесса на локальном тестовом HTTP-сервере; VPN при этом не имитируется.
 

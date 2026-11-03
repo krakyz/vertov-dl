@@ -10,6 +10,9 @@ const observer = new ResizeObserver(entries => {
 export function attachCardOutline(root: HTMLElement) {
   const info = root.querySelector<HTMLElement>('.media-info')!;
   const actions = root.querySelector<HTMLElement>('.download-actions')!;
+  const audio = actions.querySelector<HTMLButtonElement>('.download-audio')!;
+  const video = actions.querySelector<HTMLButtonElement>('.download-video')!;
+  const measure = document.createElement('canvas').getContext('2d')!;
   const svg = document.createElementNS(ns, 'svg');
   svg.classList.add('media-card-outline');
   svg.setAttribute('aria-hidden', 'true');
@@ -35,8 +38,21 @@ export function attachCardOutline(root: HTMLElement) {
     const h = info.offsetHeight;
     const a = actions.getBoundingClientRect().height;
     if (!w || !h) return;
-    const buttonWidth = `${Math.min(180, w / 2)}px`;
-    if(root.style.getPropertyValue('--action-button-width')!==buttonWidth) root.style.setProperty('--action-button-width',buttonWidth);
+    const naturalWidth = (button: HTMLButtonElement) => {
+      const style = getComputedStyle(button);
+      measure.font = style.font;
+      const icon = getComputedStyle(button,'::before');
+      const iconWidth = icon.content === 'none' ? 0 : parseFloat(icon.width) + parseFloat(style.columnGap);
+      return Math.ceil(measure.measureText(button.textContent || '').width +
+        parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + iconWidth + 1);
+    };
+    const audioWidth = naturalWidth(audio), videoWidth = naturalWidth(video);
+    const single = Boolean(root.dataset.singleAction || root.classList.contains('metadata-pending'));
+    const scale = single ? 1 : Math.min(1, w / (audioWidth + videoWidth));
+    for (const [name, width] of [['audio',audioWidth],['video',videoWidth]] as const) {
+      const value = `${Math.min(w, width * scale)}px`;
+      if(root.style.getPropertyValue(`--${name}-button-width`)!==value) root.style.setProperty(`--${name}-button-width`,value);
+    }
     const drawerWidth = actions.getBoundingClientRect().width;
     const x = w - drawerWidth;
     const cornerScale = Math.min(1, a / 28);
@@ -53,7 +69,7 @@ export function attachCardOutline(root: HTMLElement) {
     stroke.setAttribute('d', d);
     divider.setAttribute('d', `M${x-r} ${h-.5} H${w-.5}`);
     divider.style.opacity = String(Math.min(1, a / 12));
-    const mid = root.dataset.singleAction || root.classList.contains('metadata-pending') ? w - 1 : x + drawerWidth / 2;
+    const mid = root.dataset.singleAction || root.classList.contains('metadata-pending') ? w - 1 : x + audio.getBoundingClientRect().width;
     hover.setAttribute('d', `M${x-r} ${h} H${mid} V${bottom-1} H${x+br} Q${x+1} ${bottom-1} ${x+1} ${bottom-br} V${h+r} Q${x+1} ${h} ${x-r} ${h} Z`);
   };
   const targets = [root, info, actions];
@@ -61,5 +77,8 @@ export function attachCardOutline(root: HTMLElement) {
     redraw.set(target, draw);
     observer.observe(target);
   }
-  return () => { for (const target of targets) { observer.unobserve(target); redraw.delete(target); } };
+  const labels = new MutationObserver(draw);
+  labels.observe(actions,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class']});
+  void document.fonts.ready.then(()=>{if(root.isConnected) draw();});
+  return () => { labels.disconnect(); for (const target of targets) { observer.unobserve(target); redraw.delete(target); } };
 }

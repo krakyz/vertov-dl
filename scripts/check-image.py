@@ -5,7 +5,7 @@ import sys
 import time
 import uuid
 
-image = sys.argv[1] if len(sys.argv) > 1 else "vertov-dl:0.1.0-alpha.1"
+image = sys.argv[1] if len(sys.argv) > 1 else "vertov-dl:0.1.0-alpha.2"
 name = "vertov-dl-smoke-" + uuid.uuid4().hex[:8]
 try:
     subprocess.run(
@@ -40,7 +40,7 @@ try:
         text=True,
     )
     print(native.stdout.strip())
-    check = "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:47831/healthz',timeout=2)); assert r['version']=='0.1.0-alpha.1'; assert 'vertov-dl' in urllib.request.urlopen('http://127.0.0.1:47831/').read().decode(); print(json.dumps(r))"
+    check = "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:47831/healthz',timeout=2)); assert r['version']=='0.1.0-alpha.2'; assert 'vertov-dl' in urllib.request.urlopen('http://127.0.0.1:47831/').read().decode(); print(json.dumps(r))"
     for attempt in range(30):
         result = subprocess.run(
             ["docker", "exec", name, "python", "-c", check], capture_output=True, check=False

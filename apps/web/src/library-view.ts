@@ -1,5 +1,5 @@
 import { node } from './dom';
-import { bytes, duration, codec, active } from './model';
+import { bytes, duration, codec, active, mediaName } from './model';
 import type { LibrarySnapshot } from './model';
 import { showThumbnail } from './thumbnail-preview';
 
@@ -68,7 +68,7 @@ export class LibraryView {
     const now=new Date();
     const since=date==='today' ? new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime()/1000
       : date==='all' ? 0 : now.getTime()/1000-Number(date)*86400;
-    data={...data,items:data.items.filter(item=>(type==='all' || (item.preset==='audio' ? 'audio' : 'video')===type) && item.completed_at>=since)};
+    data={...data,items:data.items.filter(item=>(type==='all' || (mediaName(item)==='Аудио' ? 'audio' : 'video')===type) && item.completed_at>=since)};
     const ids=new Set(data.items.map(item=>item.id));
     for (const [id,row] of this.rows) if (!ids.has(id)) { row.root.remove(); this.rows.delete(id); }
     for (const id of this.selected) if (!ids.has(id)) this.selected.delete(id);
@@ -128,13 +128,13 @@ export class LibraryView {
       const pending=active(item), failed=item.state==='failed';
       row.root.classList.toggle('converting',pending);
       row.state.hidden=!pending && !failed;row.state.textContent=failed ? item.message : 'Конвертация в MP3…';
-      row.file.hidden=item.state!=='completed';row.convert.hidden=item.state!=='completed' || item.preset==='audio' || item.details?.artifact_media?.media_type==='audio';
+      row.file.hidden=item.state!=='completed';row.convert.hidden=item.state!=='completed' || mediaName(item)==='Аудио';
       row.remove.disabled=pending || deleting.has(item.id);
       row.lifetime.hidden=item.state!=='completed';
       row.durationBadge.textContent=duration(item.details?.duration);
       row.durationBadge.hidden=item.details?.duration==null;
       const media=item.details?.artifact_media;
-      const audio=media ? media.media_type==='audio' : item.preset==='audio';
+      const audio=mediaName(item)==='Аудио';
       const mediaCodec=media ? codec(audio ? media.audio_codec : media.video_codec) : null;
       const resolution=!audio && media?.width && media?.height ? `${media.width}×${media.height}` : null;
       const fps=!audio && media?.fps ? `${media.fps} fps` : null;

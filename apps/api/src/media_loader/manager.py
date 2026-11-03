@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import shutil
 import signal
@@ -14,30 +15,39 @@ ACTIVE = {"queued", "probing", "downloading", "processing"}
 
 
 async def stop_process(process):
+    if os.name == "posix":
+        # Workers start a new session, so their PID is also their PGID.
+        pgid = process.pid
+        if pgid <= 1 or pgid == os.getpgrp():
+            raise ValueError("Unsafe worker process group")
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                os.killpg(pgid, 0)
+                await asyncio.sleep(0.05)
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await process.wait()
+        return
+
     if process.returncode is not None:
         return
     try:
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill",
-                "/PID",
-                str(process.pid),
-                "/T",
-                "/F",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await killer.wait()
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill",
+            "/PID",
+            str(process.pid),
+            "/T",
+            "/F",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await killer.wait()
         await asyncio.wait_for(process.wait(), 5)
     except (TimeoutError, ProcessLookupError):
-        if os.name == "posix":
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        elif process.returncode is None:
+        if process.returncode is None:
             process.kill()
         await process.wait()
 
@@ -77,8 +87,26 @@ class Manager:
                 for job_id in list(tasks):
                     task, _ = tasks[job_id]
                     if task.done():
-                        await task
-                        del tasks[job_id]
+                        try:
+                            await task
+                        except Exception:
+                            logging.getLogger(__name__).exception(
+                                "Task %s failed unexpectedly", job_id
+                            )
+                            try:
+                                if self.store.get(job_id)["state"] in ACTIVE:
+                                    self.store.update(
+                                        job_id,
+                                        state="failed",
+                                        error_code="worker",
+                                        message="Не удалось завершить обработку.",
+                                    )
+                            except Exception:
+                                logging.getLogger(__name__).exception(
+                                    "Could not record task failure"
+                                )
+                        finally:
+                            del tasks[job_id]
                 queued = [
                     job
                     for job in reversed(self.store.all())
@@ -121,28 +149,29 @@ class Manager:
     async def execute(self, job):
         job_id = job["id"]
         directory = (self.settings.data_dir / "jobs" / job_id).resolve()
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        # Failed downloads resume in their existing directory; probes are new jobs.
-        spec = {
-            "kind": job["kind"],
-            "url": job["source"],
-            "preset": job["preset"],
-            "directory": str(directory),
-            "max_bytes": self.settings.max_file_bytes,
-            "proxy": f"socks5h://127.0.0.1:{self.guard_port}",
-            "use_cookies": (self.settings.data_dir / "secrets" / "cookies.enc").is_file(),
-        }
-        conversion_input = (job.get("details") or {}).get("conversion_input")
-        if conversion_input:
-            spec["conversion_input"] = conversion_input
-        spec_path, result_path = directory / "spec.json", directory / "result.json"
-        spec_path.write_text(json.dumps(spec), encoding="utf-8")
-        self.store.patch_details(
-            job_id, {"queue_seconds": round(max(0, time.time() - job["created"]), 3)}
-        )
-        self.store.update(job_id, state="probing", message="Получение данных через прокси")
         process = None
+        spec_path = directory / "spec.json"
         try:
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # Failed downloads resume in their existing directory; probes are new jobs.
+            spec = {
+                "kind": job["kind"],
+                "url": job["source"],
+                "preset": job["preset"],
+                "directory": str(directory),
+                "max_bytes": self.settings.max_file_bytes,
+                "proxy": f"socks5h://127.0.0.1:{self.guard_port}",
+                "use_cookies": (self.settings.data_dir / "secrets" / "cookies.enc").is_file(),
+            }
+            conversion_input = (job.get("details") or {}).get("conversion_input")
+            if conversion_input:
+                spec["conversion_input"] = conversion_input
+            spec_path, result_path = directory / "spec.json", directory / "result.json"
+            spec_path.write_text(json.dumps(spec), encoding="utf-8")
+            self.store.patch_details(
+                job_id, {"queue_seconds": round(max(0, time.time() - job["created"]), 3)}
+            )
+            self.store.update(job_id, state="probing", message="Получение данных через прокси")
             if shutil.disk_usage(directory).free < self.settings.reserve_bytes:
                 raise ValueError("disk")
             process = await asyncio.create_subprocess_exec(
@@ -186,7 +215,6 @@ class Manager:
             try:
                 while process.returncode is None:
                     if self.store.get(job_id)["state"] == "cancelled":
-                        await stop_process(process)
                         return
                     if time.monotonic() > deadline:
                         raise ValueError("timeout")
@@ -269,7 +297,8 @@ class Manager:
         finally:
             if process:
                 await stop_process(process)
-            spec_path.unlink(missing_ok=True)
+            if spec_path.is_file():
+                spec_path.unlink(missing_ok=True)
             current = self.store.get(job_id)
             if current["state"] != "completed" and not (
                 current["kind"] == "download" and current["state"] == "failed"

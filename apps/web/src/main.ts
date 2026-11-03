@@ -246,8 +246,13 @@ function resolve() {
     if (!value.trim()) return;
     try {
       const url = normalizeLink(value);
-      if (!entries.has(url)) { const entry = { url, pending: false }; entries.set(url, entry); void probe(entry); }
-      else if (!entries.get(url)!.probeId && !entries.get(url)!.pending && !entries.get(url)!.error) void probe(entries.get(url)!);
+      const entry = entries.get(url) ?? { url, pending: false };
+      entries.set(url, entry);
+      if (entry.pending || entry.sending || entry.error) return;
+      if (jobs.has(entry.probeId || '') || jobs.has(entry.downloadId || '')) return;
+      entry.probeId = undefined;
+      entry.downloadId = undefined;
+      void probe(entry);
     } catch (error) { input?.setAttribute('aria-invalid', 'true'); errors.push(`${index + 1}: ${(error as Error).message}`); }
   });
   if (errors.length) feedback(errors.join(' '));
@@ -305,13 +310,25 @@ function rows(focus?: number) {
   }));
   if (focus !== undefined) box.querySelectorAll('input')[Math.min(focus, values.length - 1)]?.focus();
 }
+async function afterCancellation<T>(action: () => Promise<T>): Promise<T> {
+  const deadline = performance.now() + 5000;
+  while (true) {
+    try { return await action(); }
+    catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 ||
+          error.message !== 'Подождите завершения отмены' || performance.now() >= deadline) throw error;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+}
+
 async function download(entry: MediaEntry, kind: 'video' | 'audio', id: string) {
   if (!entry.probeId || entry.sending) return;
   entry.sendingKind=kind==='audio' || (id && jobs.get(entry.probeId || '')?.details?.formats?.find(format=>format.id===id)?.vcodec==='none') ? 'audio' : 'video'; entry.sending = true; entry.error = undefined; render();
   const selection = kind === 'video' && advanced && runtime?.capabilities.exact_formats && id
     ? { format_id: id } : { preset: kind === 'audio' ? 'audio' : element<HTMLSelectElement>('quality').value };
   try { const stopped = entry.downloadId && jobs.get(entry.downloadId)?.state === 'cancelled' ? entry.downloadId : undefined;
-    const job = await api.download(entry.probeId, selection, stopped); entry.downloadId = job.id;
+    const job = await afterCancellation(() => api.download(entry.probeId!, selection, stopped)); entry.downloadId = job.id;
     const previousCard = cards.get(`job:${entry.probeId}`);
     if (previousCard && !cards.has(`job:${job.id}`)) {
       cards.delete(`job:${entry.probeId}`);
@@ -339,17 +356,7 @@ async function cancel(id: string) {
         ], {duration:260,easing:'cubic-bezier(.2,.7,.2,1)',fill:'forwards'});
       }
       card?.root.classList.add('removing');
-      // The server can still be terminating the probe subprocess after cancel returns.
-      const dismiss = async () => {
-        for (let attempt=0;;attempt++) {
-          try { await api.delete(id); return; }
-          catch (error) {
-            if (!(error instanceof ApiError) || error.status!==409 || attempt>=19) throw error;
-            await new Promise(resolve=>setTimeout(resolve,250));
-          }
-        }
-      };
-      await Promise.all([dismiss(), motion?.finished.catch(()=>{})]);
+      await Promise.all([afterCancellation(() => api.delete(id)), motion?.finished.catch(()=>{})]);
       forgetJob(id); rows(); render();
     }
     await refreshJobs();
@@ -371,21 +378,32 @@ async function retry(id: string) {
   } catch (error) { failure(error); }
 }
 function forgetJob(id: string) {
+  const hiddenUrls = new Set<string>();
+  const queuedUrl = queueEntries.get(id)?.url;
+  if (queuedUrl) hiddenUrls.add(queuedUrl);
   dispatchedDownloads.delete(id); jobs.delete(id); queueEntries.delete(id); autoDownload.forget(id);
-  for (const [url,entry] of entries) {
+  for (const [url, entry] of entries) {
     if (entry.probeId === id) {
       entries.delete(url);
-      values = values.filter(value => { try { return normalizeLink(value) !== url; } catch { return true; } });
-      savedBatch = savedBatch.filter(value => { try { return normalizeLink(value) !== url; } catch { return true; } });
-    } else if (entry.downloadId === id) entry.downloadId = undefined;
+      hiddenUrls.add(url);
+    } else if (entry.downloadId === id) {
+      entry.downloadId = undefined;
+      hiddenUrls.add(url);
+    }
   }
+  const keepLink = (value: string) => {
+    try { return !hiddenUrls.has(normalizeLink(value)); }
+    catch { return true; }
+  };
+  values = values.filter(keepLink);
+  savedBatch = savedBatch.filter(keepLink);
   if (!values.length) values=[''];
 }
 async function deleteJob(id: string) {
   if (!runtime?.capabilities.queue_archive) { feedback('Ожидается обновление сервера для безопасной очистки списка.'); return; }
   if (deleting.has(id) || clearing || !await confirmDelete(jobs.get(id)?.kind==='download' && jobs.get(id)?.state==='failed' ? 'Удалить загрузку и все её временные файлы? Продолжить её будет невозможно.' : 'Убрать запись из списка задач? Готовый файл останется в библиотеке.')) return;
   deleting.add(id); render();
-  try { await api.delete(id); forgetJob(id); rows(); await refreshJobs(); }
+  try { await afterCancellation(() => api.delete(id)); forgetJob(id); rows(); await refreshJobs(); }
   catch(error) { failure(error); }
   finally { deleting.delete(id); render(); }
 }
@@ -396,7 +414,7 @@ element('clear-jobs').addEventListener('click',async () => {
   clearing=true; render(); let removed=0;
   try {
     for (const id of ids) {
-      try { await api.delete(id); forgetJob(id); removed++; }
+      try { await afterCancellation(() => api.delete(id)); forgetJob(id); removed++; }
       catch(error) { if (error instanceof ApiError && error.status === 409) continue; throw error; }
     }
     rows(); await refreshJobs(); feedback(`Удалено: ${removed}.`);

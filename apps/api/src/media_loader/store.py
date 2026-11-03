@@ -72,9 +72,19 @@ class Store:
                 .values(details={**(job.get("details") or {}), **changes})
             )
 
-    def create(self, kind, source, preset="720"):
+    def create(self, kind, source, preset="720", *, replace=None, prepare=None):
         job_id = uuid.uuid4().hex
+        initial = {
+            "title": "Получение метаданных" if kind == "probe" else "Загрузка медиа",
+        }
+        if prepare:
+            initial.update(prepare(job_id))
         with self.engine.begin() as connection:
+            if replace:
+                details = {**(replace.get("details") or {}), "_queue_hidden": True}
+                connection.execute(
+                    jobs.update().where(jobs.c.id == replace["id"]).values(details=details)
+                )
             connection.execute(
                 jobs.insert().values(
                     id=job_id,
@@ -82,7 +92,7 @@ class Store:
                     source=source,
                     preset=preset,
                     state="queued",
-                    title="Получение метаданных" if kind == "probe" else "Загрузка медиа",
+                    **initial,
                     message="В очереди",
                     created=time.time(),
                     updated=time.time(),

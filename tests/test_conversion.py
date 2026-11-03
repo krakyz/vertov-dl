@@ -114,3 +114,33 @@ def test_manager_accepts_conversion_result_without_extractor_title(tmp_path):
         assert result["sha256"]
     finally:
         store.engine.dispose()
+
+
+@pytest.mark.parametrize("state", ["cancelled", "expired"])
+@pytest.mark.parametrize("source_exists", [True, False])
+def test_retry_conversion_recreates_local_input(tmp_path, state, source_exists):
+    settings = Settings(data_dir=tmp_path, auth_token="synthetic-token-at-least-24-chars")
+    with TestClient(create_app(settings, run_manager=False)) as client:
+        client.post("/api/login", json={"token": settings.auth_token.get_secret_value()})
+        store = client.app.state.store
+        parent = store.create("download", "https://example.org/synthetic", "best")
+        source = tmp_path / "jobs" / parent["id"] / "media.mp4"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"source fixture")
+        store.update(parent["id"], state="completed", artifact=source.name)
+        created = client.post(f"/api/library/{parent['id']}/audio").json()
+        job_id = created["id"]
+        folder = tmp_path / "jobs" / job_id
+        shutil.rmtree(folder)
+        store.update(job_id, state=state)
+        if not source_exists:
+            source.unlink()
+        response = client.post(f"/api/jobs/{job_id}/retry")
+        assert response.status_code == (202 if source_exists else 409)
+        assert len(store.all()) == 2
+        if source_exists:
+            job = response.json()
+            assert job["id"] == job_id and job["state"] == "queued"
+            assert (folder / job["details"]["conversion_input"]).read_bytes() == b"source fixture"
+        else:
+            assert store.get(job_id)["state"] == state

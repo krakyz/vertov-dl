@@ -79,14 +79,14 @@ def restrict_python_network(proxy):
 
 def format_selector(kind, preset):
     if kind == "probe":
-        return "best"
+        return "bestvideo*+bestaudio/best/bestvideo/bestaudio"
     if preset.startswith("format:"):
         format_id = preset.removeprefix("format:")
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", format_id):
             raise ValueError("Invalid format ID")
         return format_id
     if preset == "audio":
-        return "bestaudio"
+        return "bestaudio/best[acodec!=none]"
     if preset == "best":
         return "bestvideo*+bestaudio/best"
     height = int(preset)

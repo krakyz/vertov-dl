@@ -33,6 +33,12 @@ export class MediaCard {
     this.root = element<HTMLTemplateElement>('card-template').content.firstElementChild!.cloneNode(true) as HTMLElement;
     this.disposeOutline = attachCardOutline(this.root);
     this.image = query<HTMLImageElement>(this.root, '.thumbnail-image');
+    const cancelIcon = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    cancelIcon.setAttribute('class','status-cancelled');
+    cancelIcon.setAttribute('viewBox','0 0 24 24');
+    cancelIcon.setAttribute('aria-hidden','true');
+    cancelIcon.innerHTML = '<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>';
+    query(this.root,'.download-status-label').append(cancelIcon);
     this.choice = query<HTMLSelectElement>(this.root, '.format-choice');
     this.image.addEventListener('load', () => {
       query(this.root, '.thumbnail').classList.toggle('portrait', this.image.naturalWidth / this.image.naturalHeight < 1.45);
@@ -52,7 +58,7 @@ export class MediaCard {
     query(this.root, '.refresh-data').addEventListener('click', actions.refresh);
     this.choice.addEventListener('change', () => {
       this.refreshBadge?.();
-      if (!this.current || !active(this.current)) query(this.root, '.download-video').textContent = this.exactEnabled && this.choice.value ? 'Скачать формат' : 'Скачать видео';
+      if (!this.current || !active(this.current)) query(this.root, '.download-video').textContent = this.current?.kind==='download' && this.current.state==='completed' && mediaName(this.current)==='Видео' ? 'Скачать видео ещё раз' : this.exactEnabled && this.choice.value ? 'Скачать формат' : 'Скачать видео';
     });
   }
 
@@ -123,16 +129,18 @@ export class MediaCard {
       if(icon.getAttribute('src')!==path) icon.src=path;
     };
     this.refreshBadge();
-    query(this.root, '.download-video').textContent = this.exactEnabled && this.choice.value ? 'Скачать формат' : 'Скачать видео';
+    query(this.root, '.download-video').textContent = this.current?.kind==='download' && this.current.state==='completed' && mediaName(this.current)==='Видео' ? 'Скачать видео ещё раз' : this.exactEnabled && this.choice.value ? 'Скачать формат' : 'Скачать видео';
     const working = Boolean(this.current && active(this.current));
     this.root.classList.toggle('working', working);
+    this.root.classList.toggle('engaged', working || Boolean(entry.pending || entry.sending));
+    this.root.classList.toggle('download-finished', download?.state === 'completed');
     this.root.classList.toggle('metadata-pending', Boolean(!download && (entry.pending || (probe && active(probe)))));
     const locked = Boolean(entry.sending || (download && (active(download) || download.state==='failed')));
     const lockedKind = download ? (mediaName(download)==='Аудио' ? 'audio' : 'video') : entry.sendingKind;
     this.root.dataset.singleAction = locked && lockedKind ? lockedKind : '';
     this.cancellation.update(working && !(download && lockedKind==='audio') ? this.current!.id : undefined, options.authenticated);
     const resumable=download?.state==='failed';
-    query(this.root, '.download-audio').textContent=resumable && download.preset==='audio' ? 'Продолжить MP3' : 'Скачать аудио';
+    query(this.root, '.download-audio').textContent=resumable && download.preset==='audio' ? 'Продолжить MP3' : download?.state==='completed' && mediaName(download)==='Аудио' ? 'Скачать аудио ещё раз' : 'Скачать аудио';
     if(resumable) {
       const audio=download.preset==='audio';
       query<HTMLButtonElement>(this.root,'.download-audio').disabled=!audio || !options.authenticated || Boolean(entry.sending);
@@ -154,7 +162,9 @@ export class MediaCard {
     const statusText = query<HTMLElement>(status, '.download-status-text');
     const completed = !entry.error && !entry.sending && download?.state === 'completed';
     status.classList.toggle('complete', completed);
-    query(status,'.status-progress').setAttribute('aria-hidden',String(completed));
+    const cancelled = !entry.sending && (download || probe)?.state === 'cancelled';
+    status.classList.toggle('cancelled', cancelled);
+    query(status,'.status-progress').setAttribute('aria-hidden',String(completed || cancelled));
     status.classList.toggle('queued', !entry.error && !entry.sending && (download || probe)?.state === 'queued');
     const statusJob = download || probe;
     const animating = !entry.error && (entry.sending || (statusJob ? ['probing', 'downloading', 'processing'].includes(statusJob.state) : entry.pending));
