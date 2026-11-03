@@ -305,7 +305,7 @@ button.thumbnail{padding:0;border:0;cursor:zoom-in}button.thumbnail:disabled{opa
 .media-card.metadata-pending .download-actions .download-video:hover:not(:disabled){background:#353538}
 
 .media-card .download-actions button.cancel-action::before{content:none}
-.media-card .download-actions button.cancel-action{border:0}
+.media-card .download-actions button.cancel-action{border:0;white-space:nowrap}
 
 .media-card-contour{stroke:none}
 .media-card-stroke{fill:none;stroke:var(--border);stroke-width:1;stroke-linejoin:round}
@@ -314,3 +314,24 @@ button.thumbnail{padding:0;border:0;cursor:zoom-in}button.thumbnail:disabled{opa
 .media-card .download-actions{clip-path:inset(0 .5px .5px .5px round 0 0 15.5px 15.5px)}
 
 .media-card.removing{pointer-events:none}
+
+.status-cancelled{display:none;flex:none;width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.download-status.cancelled .status-cancelled{display:block;color:var(--muted)}
+.download-status.cancelled{grid-template-columns:minmax(0,1fr) minmax(0,0px);gap:0}
+.download-status.cancelled .status-progress{opacity:0;visibility:hidden;pointer-events:none}
+@media(hover:hover) and (pointer:fine){
+ .results>.media-card.download-finished:not(.engaged) .download-actions{max-height:0;opacity:0;visibility:hidden;pointer-events:none;transition:width 260ms cubic-bezier(.2,.7,.2,1),max-height 240ms ease,opacity 180ms ease,visibility 240ms;transition-delay:120ms}
+ .results>.media-card:is(.engaged,:hover,:focus-within) .download-actions{max-height:100px;opacity:1;visibility:visible;pointer-events:auto;transition-delay:0ms}
+}
+@media(prefers-reduced-motion:reduce){.results>.media-card .download-actions{transition:none!important}}
+
+@media(hover:hover) and (pointer:fine){.results>.media-card.download-finished:is(:hover,:focus-within) .download-actions{max-height:100px;opacity:1;visibility:visible;pointer-events:auto;transition-delay:0ms}}
+
+/* Action widths follow labels instead of a fixed 180 px slot. */
+.media-card .download-actions{width:calc(var(--audio-button-width,150px) + var(--video-button-width,150px));max-width:100%}
+.media-card .download-actions .download-audio{flex:0 0 var(--audio-button-width,150px);width:var(--audio-button-width,150px)}
+.media-card .download-actions .download-video{flex:0 0 var(--video-button-width,150px);width:var(--video-button-width,150px)}
+.media-card[data-single-action=video] .download-actions,.media-card.metadata-pending .download-actions{width:var(--video-button-width,150px)}
+.media-card[data-single-action=audio] .download-actions{width:var(--audio-button-width,150px)}
+.media-card[data-single-action=video] .download-audio{margin-left:calc(-1 * var(--audio-button-width,150px));transform:translateX(var(--audio-button-width,150px))}
+.media-card[data-single-action=audio] .download-video{margin-right:calc(-1 * var(--video-button-width,150px));transform:translateX(var(--video-button-width,150px))}

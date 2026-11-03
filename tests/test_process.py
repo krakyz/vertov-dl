@@ -1,6 +1,10 @@
 import asyncio
+import os
+import signal
 import sys
+from pathlib import Path
 
+import pytest
 from media_loader import manager as module
 from media_loader.config import Settings
 from media_loader.manager import Manager
@@ -102,3 +106,72 @@ async def test_probe_ready_before_preview_and_preview_failure_keeps_success(tmp_
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         store.engine.dispose()
+
+
+async def test_preparation_failure_does_not_stop_queue(tmp_path, monkeypatch):
+    settings = Settings(
+        data_dir=tmp_path, reserve_bytes=0, auth_token="test-only-token-123456789012345"
+    )
+    store = Store(tmp_path)
+    first = store.create("download", "https://example.org/first")
+    second = store.create("download", "https://example.org/second")
+    folder = tmp_path / "jobs"
+    folder.mkdir()
+    (folder / first["id"]).touch()
+    manager = Manager(settings, store, 1)
+    execute = manager.execute
+
+    async def run_job(job):
+        if job["id"] == first["id"]:
+            await execute(job)
+        else:
+            store.update(job["id"], state="completed")
+            manager.stopping = True
+
+    monkeypatch.setattr(manager, "execute", run_job)
+    await asyncio.wait_for(manager.run(), 5)
+    assert store.get(first["id"])["state"] == "failed"
+    assert store.get(second["id"])["state"] == "completed"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux process groups")
+@pytest.mark.parametrize("leader_exits", [False, True])
+async def test_stop_process_kills_descendant_ignoring_term(tmp_path, leader_exits):
+    marker = tmp_path / "pid"
+    child = (
+        "import os,signal,time,pathlib;"
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()));time.sleep(60)"
+    )
+    parent = f"import subprocess,sys,time;subprocess.Popen([sys.executable,'-c',{child!r}]);"
+    if not leader_exits:
+        parent += "time.sleep(60)"
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", parent, start_new_session=True
+    )
+    try:
+        for _ in range(100):
+            if marker.exists() and marker.read_text():
+                break
+            await asyncio.sleep(0.02)
+        pid = int(marker.read_text())
+        if leader_exits:
+            await asyncio.wait_for(process.wait(), 2)
+        await asyncio.wait_for(module.stop_process(process), 4)
+        status = Path("/proc") / str(pid) / "status"
+        for _ in range(20):
+            try:
+                lines = status.read_text().splitlines()
+                if any(line.startswith("State:") and "Z (zombie)" in line for line in lines):
+                    break
+            except FileNotFoundError:
+                break
+            await asyncio.sleep(0.025)
+        else:
+            pytest.fail("Worker descendant is still running")
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await process.wait()

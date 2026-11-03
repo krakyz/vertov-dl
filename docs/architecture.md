@@ -1,4 +1,4 @@
-# Архитектура vertov-dl 0.1.0-alpha.1
+# Архитектура vertov-dl 0.1.0-alpha.2
 
 WebUI TypeScript/Vite/CSS без React → FastAPI → SQLite + один Manager → изолированные дочерние процессы yt-dlp/FFmpeg. Готовые файлы передаются FileResponse/Range, не прямыми CDN-ссылками.
 

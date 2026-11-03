@@ -1,4 +1,4 @@
-# vertov-dl · 0.1.0-alpha.1
+# vertov-dl · 0.1.0-alpha.2
 
 Личный серверный загрузчик медиа: Python/FastAPI, TypeScript/Vite без React, SQLite, yt-dlp, FFmpeg и Deno. Интерфейс работает в браузере, готовые файлы передаются штатной браузерной загрузкой.
 

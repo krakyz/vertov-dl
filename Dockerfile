@@ -21,7 +21,7 @@ COPY scripts/check-native.py /opt/media-tools/check-native.py
 RUN python /opt/media-tools/check-native.py > /opt/media-tools/native-security.json
 COPY --from=deno /usr/bin/deno /usr/local/bin/deno
 WORKDIR /app
-LABEL org.opencontainers.image.title="vertov-dl" org.opencontainers.image.version="0.1.0-alpha.1" org.opencontainers.image.licenses="MPL-2.0"
+LABEL org.opencontainers.image.title="vertov-dl" org.opencontainers.image.version="0.1.0-alpha.2" org.opencontainers.image.licenses="MPL-2.0"
 COPY requirements.lock pyproject.toml LICENSE NOTICE.md THIRD_PARTY_NOTICES.md ./
 RUN pip install --no-cache-dir -r requirements.lock
 COPY LICENSES LICENSES

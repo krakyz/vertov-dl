@@ -1,6 +1,6 @@
 # vertov-dl
 
-Версия: 0.1.0-alpha.1. Исходный код проекта распространяется под Mozilla Public License 2.0 (MPL-2.0), см. LICENSE.
+Версия: 0.1.0-alpha.2. Исходный код проекта распространяется под Mozilla Public License 2.0 (MPL-2.0), см. LICENSE.
 
 This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 

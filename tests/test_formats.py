@@ -51,7 +51,6 @@ def test_exact_format_has_no_quality_fallback():
     assert format_selector("download", "format:139-drc") == "139-drc"
     with pytest.raises(ValueError):
         format_selector("download", "format:18/best")
-    assert format_selector("probe", "720") == "best"
 
 
 def test_thumbnail_type_and_size_are_checked(tmp_path):
@@ -132,3 +131,37 @@ def test_cached_thumbnail_does_not_make_another_network_request(tmp_path):
         save_thumbnail(Offline(), {"thumbnail": "https://example.org/image"}, tmp_path)
         == "image/png"
     )
+
+
+@pytest.mark.parametrize(
+    ("kind", "preset", "tracks", "selected"),
+    [
+        ("download", "audio", ["muxed"], "muxed"),
+        ("download", "audio", ["muxed", "audio"], "audio"),
+        ("probe", "720", ["video", "audio"], "video+audio"),
+        ("download", "720", ["video", "audio"], "video+audio"),
+        ("probe", "720", ["muxed"], "muxed"),
+        ("probe", "720", ["video"], "video"),
+        ("probe", "720", ["audio"], "audio"),
+    ],
+)
+def test_selector_accepts_supported_stream_layouts(kind, preset, tracks, selected):
+    from yt_dlp import YoutubeDL
+
+    formats = [
+        {
+            "format_id": track,
+            "url": f"https://example.org/{track}.mp4",
+            "ext": "mp4",
+            "vcodec": "none" if track == "audio" else "h264",
+            "acodec": "none" if track == "video" else "aac",
+            "height": 720 if track != "audio" else None,
+        }
+        for track in tracks
+    ]
+    with YoutubeDL({"quiet": True, "format": format_selector(kind, preset)}) as downloader:
+        result = downloader.process_ie_result(
+            {"id": "synthetic", "title": "Synthetic", "formats": formats}, download=False
+        )
+    assert result["format_id"] == selected
+    assert {item["format_id"] for item in result["formats"]} == set(tracks)

@@ -2,7 +2,7 @@ name: vertov-dl
 services:
   app:
     build: .
-    image: vertov-dl:0.1.0-alpha.1
+    image: vertov-dl:0.1.0-alpha.2
     network_mode: host
     environment:
       MEDIA_HOST: "127.0.0.1"

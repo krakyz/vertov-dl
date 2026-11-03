@@ -187,3 +187,16 @@ def test_cancelled_download_retry_keeps_id(client):
     response = client.post(f"/api/jobs/{old['id']}/retry")
     assert response.status_code == 202
     assert response.json()["id"] == old["id"]
+
+
+def test_full_history_allows_download_to_replace_visible_probe(tmp_path):
+    app = create_app(Settings(data_dir=tmp_path, auth_token=TOKEN, max_jobs=1), run_manager=False)
+    with TestClient(app) as client:
+        login(client)
+        store = app.state.store
+        probe = store.create("probe", "https://example.org/video")
+        store.update(probe["id"], state="completed", details={"formats": []})
+        response = client.post("/api/downloads", json={"probe_id": probe["id"]})
+        assert response.status_code == 202
+        assert [job["id"] for job in store.visible()] == [response.json()["id"]]
+        assert client.post("/api/downloads", json={"probe_id": probe["id"]}).status_code == 409

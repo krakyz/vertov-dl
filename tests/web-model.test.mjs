@@ -47,9 +47,9 @@ test('status includes media type and only claims browser dispatch when requested
   const job={kind:'download',preset:'best',details:null,state:'queued'};
   assert.equal(downloadStatus(job),'Видео в очереди');
   assert.equal(downloadStatus({...job,preset:'audio'}),'Аудио в очереди');
-  assert.equal(downloadStatus({...job,state:'completed'},true),'Готово! Видео отправлено в браузер');
-  assert.equal(downloadStatus({...job,state:'completed',preset:'audio'},true),'Готово! Аудио отправлено в браузер');
-  assert.equal(downloadStatus({...job,state:'completed'}),'Готово! Видео доступно для скачивания');
+  assert.equal(downloadStatus({...job,state:'completed'},true),'Готово. Видео отправлено в браузер и добавлено в библиотеку');
+  assert.equal(downloadStatus({...job,state:'completed',preset:'audio'},true),'Готово. Аудио отправлено в браузер и добавлено в библиотеку');
+  assert.equal(downloadStatus({...job,state:'completed'}),'Готово. Видео доступно для скачивания');
   assert.equal(downloadStatus({...job,preset:'format:140',details:{formats:[{id:'140',vcodec:'none'}]},state:'processing'}),'Обработка аудио');
 });
 

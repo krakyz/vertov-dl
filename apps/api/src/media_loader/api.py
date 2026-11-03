@@ -7,6 +7,7 @@ import re
 import shutil
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -213,7 +214,7 @@ def create_app(settings: Settings, *, run_manager=True):
         if sum(job["state"] in ACTIVE for job in store.all()) >= 20:
             raise HTTPException(409, "Очередь заполнена")
 
-    def inherit_metadata(created, parent):
+    def prepare_metadata(job_id, parent):
         details = dict(parent.get("details") or {})
         details.pop("_queue_hidden", None)
         probe_id = parent["id"] if parent["kind"] == "probe" else details.get("source_probe_id")
@@ -228,14 +229,55 @@ def create_app(settings: Settings, *, run_manager=True):
         details["has_thumbnail"] = False
         if source.is_file() and source.stat().st_size <= 2 * 1024**2:
             try:
-                target = settings.data_dir / "jobs" / created["id"]
+                target = settings.data_dir / "jobs" / job_id
                 target.mkdir(parents=True, exist_ok=True, mode=0o700)
                 if source.resolve() != (target / "thumbnail.img").resolve():
                     shutil.copyfile(source, target / "thumbnail.img")
                 details["has_thumbnail"] = True
             except OSError:
                 pass
-        store.update(created["id"], title=parent["title"], details=details)
+        return {"title": parent["title"], "details": details}
+
+    def inherit_metadata(created, parent):
+        store.update(created["id"], **prepare_metadata(created["id"], parent))
+        return public_job(store.get(created["id"]))
+
+    def prepare_conversion(parent, previous=None):
+        if parent["state"] != "completed" or not parent["artifact"]:
+            raise HTTPException(409, "Исходный файл удалён")
+        source_dir = (settings.data_dir / "jobs" / parent["id"]).resolve()
+        source = (source_dir / parent["artifact"]).resolve()
+        if source.parent != source_dir or not source.is_file():
+            raise HTTPException(409, "Исходный файл удалён")
+        created = previous or store.create("download", parent["source"], "audio")
+        folder = settings.data_dir / "jobs" / created["id"]
+        input_name = "source" + source.suffix
+        try:
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if not (folder / input_name).is_file():
+                os.link(source, folder / input_name)
+        except OSError:
+            if previous is None:
+                store.update(
+                    created["id"], state="failed", message="Не удалось подготовить локальный файл"
+                )
+                store.dismiss(created["id"])
+                shutil.rmtree(folder, ignore_errors=True)
+            raise HTTPException(503, "Не удалось подготовить локальный файл") from None
+        inherit_metadata(created, parent)
+        details = dict(store.get(created["id"])["details"])
+        details.pop("artifact_media", None)
+        details.update(conversion_source=parent["id"], conversion_input=input_name)
+        store.update(
+            created["id"],
+            details=details,
+            state="queued",
+            progress=None,
+            artifact=None,
+            sha256=None,
+            error_code=None,
+            message="Конвертация в очереди",
+        )
         return public_job(store.get(created["id"]))
 
     auth = [Depends(authenticated)]
@@ -295,10 +337,10 @@ def create_app(settings: Settings, *, run_manager=True):
 
     @app.post("/api/downloads", status_code=202, dependencies=auth)
     async def download(body: Download):
-        capacity(body.replace_job_id)
         parent = get_job(body.probe_id)
         if parent["kind"] != "probe" or parent["state"] != "completed":
             raise HTTPException(409, "Сначала получите метаданные")
+        capacity(body.replace_job_id or parent["id"])
         preset = body.preset
         if body.format_id:
             if "preset" in body.model_fields_set:
@@ -329,10 +371,14 @@ def create_app(settings: Settings, *, run_manager=True):
                 message="В очереди",
             )
             return inherit_metadata(store.get(previous["id"]), parent)
-        created = store.create("download", parent["source"], preset)
-        result = inherit_metadata(created, parent)
-        store.dismiss(parent["id"])
-        return result
+        created = store.create(
+            "download",
+            parent["source"],
+            preset,
+            replace=parent,
+            prepare=lambda job_id: prepare_metadata(job_id, parent),
+        )
+        return public_job(created)
 
     @app.post("/api/jobs/{job_id}/cancel", dependencies=auth)
     async def cancel(job_id: str):
@@ -348,7 +394,26 @@ def create_app(settings: Settings, *, run_manager=True):
         job = get_job(job_id)
         if job["state"] not in {"failed", "cancelled", "expired"}:
             raise HTTPException(409, "Повтор недоступен")
-        if job["kind"] == "download" and job["state"] in {"failed", "cancelled"}:
+        conversion_source = (job.get("details") or {}).get("conversion_source")
+        if conversion_source:
+            if (job.get("details") or {}).get("_queue_hidden") or (
+                manager and job_id in manager.current_ids
+            ):
+                raise HTTPException(409, "Повтор недоступен")
+            input_name = (job.get("details") or {}).get("conversion_input")
+            pinned = (
+                input_name
+                and Path(input_name).name == input_name
+                and (settings.data_dir / "jobs" / job_id / input_name).is_file()
+            )
+            if not pinned:
+                parent = store.get(conversion_source)
+                if not parent:
+                    raise HTTPException(409, "Исходный файл удалён")
+                return prepare_conversion(parent, job)
+        if job["kind"] == "download" and (
+            conversion_source or job["state"] in {"failed", "cancelled"}
+        ):
             if manager and job_id in manager.current_ids:
                 raise HTTPException(409, "Подождите завершения работы")
             if (job.get("details") or {}).get("_queue_hidden"):
@@ -409,29 +474,7 @@ def create_app(settings: Settings, *, run_manager=True):
             ] in ACTIVE:
                 return public_job(existing)
         capacity()
-        source_dir = (settings.data_dir / "jobs" / job_id).resolve()
-        source = (source_dir / parent["artifact"]).resolve()
-        if source.parent != source_dir or not source.is_file():
-            raise HTTPException(409, "Исходный файл удалён")
-        created = store.create("download", parent["source"], "audio")
-        folder = settings.data_dir / "jobs" / created["id"]
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        input_name = "source" + source.suffix
-        try:
-            os.link(source, folder / input_name)
-        except OSError:
-            store.update(
-                created["id"], state="failed", message="Не удалось подготовить локальный файл"
-            )
-            store.dismiss(created["id"])
-            shutil.rmtree(folder, ignore_errors=True)
-            raise HTTPException(503, "Не удалось подготовить локальный файл") from None
-        inherit_metadata(created, parent)
-        details = dict(store.get(created["id"])["details"])
-        details.pop("artifact_media", None)
-        details.update(conversion_source=job_id, conversion_input=input_name)
-        store.update(created["id"], details=details, message="Конвертация в очереди")
-        return public_job(store.get(created["id"]))
+        return prepare_conversion(parent)
 
     @app.delete("/api/library/{job_id}", dependencies=auth)
     async def delete_library_file(job_id: str):

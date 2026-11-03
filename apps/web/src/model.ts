@@ -97,7 +97,8 @@ export function jobError(job: Pick<Job, 'error_code' | 'message'>) {
 
 export function mediaName(job: Pick<Job, 'preset' | 'details'>): 'Видео' | 'Аудио' {
   const format = job.preset.startsWith('format:') ? job.details?.formats?.find(format=>format.id===job.preset.slice(7)) : undefined;
-  return job.preset==='audio' || job.details?.artifact_media?.media_type==='audio' || format?.vcodec==='none' ? 'Аудио' : 'Видео';
+  const media = job.details?.artifact_media?.media_type;
+  return (media ? media === 'audio' : job.preset === 'audio' || format?.vcodec === 'none') ? 'Аудио' : 'Видео';
 }
 
 export function downloadStatus(job: Job, dispatched = false): string {
@@ -108,7 +109,7 @@ export function downloadStatus(job: Job, dispatched = false): string {
     case 'probing': return `Получение метаданных ${lower}`;
     case 'downloading': return `Загрузка ${lower}`;
     case 'processing': return job.details?.conversion_source ? 'Конвертация видео в MP3' : `Обработка ${lower}`;
-    case 'completed': return dispatched ? `Готово! ${media} отправлено в браузер` : `Готово! ${media} доступно для скачивания`;
+    case 'completed': return dispatched ? `Готово. ${media} отправлено в браузер и добавлено в библиотеку` : `Готово. ${media} доступно для скачивания`;
     case 'failed': return `Ошибка загрузки ${lower}: ${jobError(job)}`;
     case 'cancelled': return `Загрузка ${lower} отменена`;
     case 'expired': return `${media}: ${job.message}`;
